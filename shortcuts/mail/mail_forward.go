@@ -55,6 +55,9 @@ var MailForward = common.Shortcut{
 		return api
 	},
 	Validate: func(ctx context.Context, runtime *common.RuntimeContext) error {
+		if err := validateConfirmSendScope(runtime); err != nil {
+			return err
+		}
 		if runtime.Bool("confirm-send") {
 			if err := validateComposeHasAtLeastOneRecipient(runtime.Str("to"), runtime.Str("cc"), runtime.Str("bcc")); err != nil {
 				return err
