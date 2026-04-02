@@ -841,7 +841,7 @@ func TestResolveLocalImagePathsNoImages(t *testing.T) {
 
 func TestNewInlinePartRejectsInvalidCIDChars(t *testing.T) {
 	content := []byte{0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A}
-	for _, bad := range []string{"my logo", "a\tb", "cid<x>", "cid(x)"} {
+	for _, bad := range []string{"my logo", "a\tb", "cid<x>", "cid(x)", "cid\r\nx"} {
 		_, err := newInlinePart("test.png", content, bad, "test.png", "image/png")
 		if err == nil {
 			t.Errorf("expected error for CID %q, got nil", bad)
