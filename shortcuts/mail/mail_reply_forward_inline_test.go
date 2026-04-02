@@ -13,7 +13,6 @@ import (
 )
 
 // stubSourceMessageWithInlineImages registers HTTP stubs for a source message.
-//
 func stubSourceMessageWithInlineImages(reg *httpmock.Registry, bodyHTML string, allImages []map[string]interface{}) {
 	// Profile
 	reg.Register(&httpmock.Stub{

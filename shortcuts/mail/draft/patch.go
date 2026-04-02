@@ -1044,6 +1044,7 @@ func FindOrphanedCIDs(html string, addedCIDs []string) []string {
 //  1. Resolves local <img src="./path"> to inline CID parts.
 //  2. Validates all CID references in HTML resolve to MIME parts.
 //  3. Removes orphaned inline MIME parts no longer referenced by HTML.
+//
 // NOTE: The EML builder path has an equivalent function processInlineImagesForEML
 // in shortcuts/mail/helpers.go. When adding new validation or processing logic here,
 // update processInlineImagesForEML as well (or extract a shared function).

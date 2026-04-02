@@ -46,7 +46,7 @@ lark-cli mail +send --to alice@example.com --subject '周报' \
 # 保存带附件的草稿
 lark-cli mail +send --to alice@example.com --subject '请查收' --body '<p>见附件</p>' --attach ./report.pdf,./logs.zip
 
-# 保存带内嵌图片的草稿（推荐：直接用本地路径，自动解析）
+# 保存带内嵌图片的草稿（推荐：直接用相对路径，自动解析）
 lark-cli mail +send --to alice@example.com --subject '预览图' --body '<img src="./logo.png" />'
 
 # 纯文本邮件（仅在内容极简时使用）
@@ -62,7 +62,7 @@ lark-cli mail +send --to alice@example.com --subject '测试' --body '<p>test</p
 |------|------|------|
 | `--to <emails>` | 是 | 收件人邮箱，多个用逗号分隔 |
 | `--subject <text>` | 是 | 邮件主题 |
-| `--body <text>` | 是 | 邮件正文。推荐使用 HTML 获得富文本排版；也支持纯文本（自动检测）。使用 `--plain-text` 可强制纯文本模式。支持 `<img src="./local.png" />` 本地路径自动解析为内嵌图片 |
+| `--body <text>` | 是 | 邮件正文。推荐使用 HTML 获得富文本排版；也支持纯文本（自动检测）。使用 `--plain-text` 可强制纯文本模式。支持 `<img src="./local.png" />` 相对路径自动解析为内嵌图片（仅支持相对路径，不支持绝对路径） |
 | `--from <email>` | 否 | 发件人邮箱地址（默认读取 user_mailboxes.profile.primary_email_address） |
 | `--cc <emails>` | 否 | 抄送邮箱，多个用逗号分隔 |
 | `--bcc <emails>` | 否 | 密送邮箱，多个用逗号分隔 |

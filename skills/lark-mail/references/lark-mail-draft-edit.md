@@ -198,7 +198,7 @@ lark-cli mail +draft-edit --draft-id <draft_id> --inspect
 { "op": "add_inline", "path": "./logo.png", "cid": "logo" }
 ```
 
-> **推荐方式：** 直接在 `set_body`/`set_reply_body` 的 HTML 中使用 `<img src="./logo.png" />`（本地文件路径），系统会自动创建 MIME 内嵌部分、生成 CID 并替换为 `cid:` 引用。删除或替换 `<img>` 标签时，对应的 MIME 部分会自动清理。详见[在正文中插入内嵌图片](#在正文中插入内嵌图片)。
+> **推荐方式：** 直接在 `set_body`/`set_reply_body` 的 HTML 中使用 `<img src="./logo.png" />`（相对路径），系统会自动创建 MIME 内嵌部分、生成 CID 并替换为 `cid:` 引用。仅支持相对路径（如 `./logo.png`），不支持绝对路径。删除或替换 `<img>` 标签时，对应的 MIME 部分会自动清理。详见[在正文中插入内嵌图片](#在正文中插入内嵌图片)。
 >
 > `add_inline` 仅在需要精确控制 CID 命名时使用。使用时仍需在 HTML 正文中加入 `<img src="cid:...">` 引用。
 
@@ -304,13 +304,13 @@ lark-cli mail +draft-edit --draft-id <draft_id> --patch-file ./patch.json
 
 ### 在正文中插入内嵌图片
 
-直接在 `set_body`/`set_reply_body` 的 HTML 中使用本地文件路径即可。系统会自动创建 MIME 内嵌部分并替换为 `cid:` 引用。
+直接在 `set_body`/`set_reply_body` 的 HTML 中使用相对路径即可（如 `./logo.png`，不支持绝对路径）。系统会自动创建 MIME 内嵌部分并替换为 `cid:` 引用。
 
 ```bash
 # 1. 查看草稿以获取当前 HTML 正文
 lark-cli mail +draft-edit --draft-id <draft_id> --inspect
 
-# 2. 编写补丁 — 直接使用本地文件路径（注意：回复草稿用 set_reply_body，普通草稿用 set_body）
+# 2. 编写补丁 — 直接使用相对路径（注意：回复草稿用 set_reply_body，普通草稿用 set_body）
 cat > ./patch.json << 'EOF'
 {
   "ops": [
@@ -326,7 +326,7 @@ lark-cli mail +draft-edit --draft-id <draft_id> --patch-file ./patch.json
 内嵌图片的增删改通过 HTML 正文自动联动：
 - **添加**：在 HTML 中写 `<img src="./image.png" />`，自动创建 MIME 部分
 - **删除**：从 HTML 中移除 `<img>` 标签，对应 MIME 部分自动清理
-- **替换**：将 `src` 改为新的本地路径，旧 MIME 部分自动移除、新部分自动创建
+- **替换**：将 `src` 改为新的相对路径，旧 MIME 部分自动移除、新部分自动创建
 
 > **高级用法：** 需要精确控制 CID 命名时，仍可使用 `add_inline` 手动添加 MIME 部分，并在 HTML 中用 `<img src="cid:your-cid">` 引用。
 

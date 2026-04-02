@@ -42,7 +42,7 @@ lark-cli mail +reply-all --message-id <邮件ID> --body '<p>同步更新</p>' --
 # 从回复名单中排除某些地址（草稿）
 lark-cli mail +reply-all --message-id <邮件ID> --body '<p>见上</p>' --remove bot@example.com,noreply@example.com
 
-# 回复全部时插入内嵌图片（推荐：直接用本地路径，自动解析）
+# 回复全部时插入内嵌图片（推荐：直接用相对路径，自动解析）
 lark-cli mail +reply-all --message-id <邮件ID> --body '<p>详见图示：<img src="./logo.png" /></p>'
 
 # 纯文本回复全部（仅在内容极简时使用）
@@ -60,7 +60,7 @@ lark-cli mail +reply-all --message-id <邮件ID> --body '测试' --dry-run
 | 参数 | 必填 | 说明 |
 |------|------|------|
 | `--message-id <id>` | 是 | 被回复的邮件 ID |
-| `--body <text>` | 是 | 回复正文。推荐使用 HTML 获得富文本排版；也支持纯文本。根据回复正文和原邮件正文自动检测 HTML。使用 `--plain-text` 可强制纯文本模式。支持 `<img src="./local.png" />` 本地路径自动解析为内嵌图片 |
+| `--body <text>` | 是 | 回复正文。推荐使用 HTML 获得富文本排版；也支持纯文本。根据回复正文和原邮件正文自动检测 HTML。使用 `--plain-text` 可强制纯文本模式。支持 `<img src="./local.png" />` 相对路径自动解析为内嵌图片（仅支持相对路径，不支持绝对路径） |
 | `--from <email>` | 否 | 发件人邮箱地址（默认读取 user_mailboxes.profile.primary_email_address） |
 | `--to <emails>` | 否 | 额外收件人，多个用逗号分隔（追加到自动聚合结果） |
 | `--cc <emails>` | 否 | 额外抄送，多个用逗号分隔 |

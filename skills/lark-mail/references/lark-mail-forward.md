@@ -39,7 +39,7 @@ lark-cli mail +forward --message-id <邮件ID> --to alice@example.com --body '<p
 # 转发并附加说明 + 抄送（草稿）
 lark-cli mail +forward --message-id <邮件ID> --to alice@example.com --cc bob@example.com --body '<b>请参考</b>'
 
-# 转发时插入内嵌图片（推荐：直接用本地路径，自动解析）
+# 转发时插入内嵌图片（推荐：直接用相对路径，自动解析）
 lark-cli mail +forward --message-id <邮件ID> --to alice@example.com --body '<p>详见图示：<img src="./logo.png" /></p>'
 
 # 纯文本转发（仅在内容极简时使用）
@@ -58,7 +58,7 @@ lark-cli mail +forward --message-id <邮件ID> --to alice@example.com --dry-run
 |------|------|------|
 | `--message-id <id>` | 是 | 被转发的邮件 ID |
 | `--to <emails>` | 是 | 收件人邮箱，多个用逗号分隔 |
-| `--body <text>` | 否 | 转发时附加的说明文字。推荐使用 HTML 获得富文本排版；也支持纯文本。根据转发正文和原邮件正文自动检测 HTML。使用 `--plain-text` 可强制纯文本模式。支持 `<img src="./local.png" />` 本地路径自动解析为内嵌图片 |
+| `--body <text>` | 否 | 转发时附加的说明文字。推荐使用 HTML 获得富文本排版；也支持纯文本。根据转发正文和原邮件正文自动检测 HTML。使用 `--plain-text` 可强制纯文本模式。支持 `<img src="./local.png" />` 相对路径自动解析为内嵌图片（仅支持相对路径，不支持绝对路径） |
 | `--from <email>` | 否 | 发件人邮箱地址（默认读取 user_mailboxes.profile.primary_email_address） |
 | `--cc <emails>` | 否 | 抄送邮箱，多个用逗号分隔 |
 | `--bcc <emails>` | 否 | 密送邮箱，多个用逗号分隔 |
