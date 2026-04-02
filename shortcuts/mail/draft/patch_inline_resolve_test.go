@@ -590,6 +590,18 @@ Just plain text.
 	if err != nil {
 		t.Fatalf("Apply() error = %v", err)
 	}
+	textPart := findPrimaryBodyPart(snapshot.Body, "text/plain")
+	if textPart == nil {
+		t.Fatal("text/plain part not found")
+	}
+	if got := string(textPart.Body); got != "Updated plain text." {
+		t.Fatalf("text/plain body = %q, want %q", got, "Updated plain text.")
+	}
+	for _, part := range flattenParts(snapshot.Body) {
+		if part != nil && strings.EqualFold(part.ContentDisposition, "inline") && part.ContentID != "" {
+			t.Fatalf("unexpected inline part with CID %q in text-only draft", part.ContentID)
+		}
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -647,6 +659,9 @@ func TestIsLocalFileSrc(t *testing.T) {
 		{"../images/logo.png", true},
 		{"logo.png", true},
 		{"/absolute/path/logo.png", true},
+		{`C:\images\logo.png`, false},
+		{"C:/images/logo.png", false},
+		{`c:\path\file.png`, false},
 		{"cid:logo", false},
 		{"CID:logo", false},
 		{"http://example.com/img.png", false},
