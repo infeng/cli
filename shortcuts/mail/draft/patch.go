@@ -30,16 +30,29 @@ var protectedHeaders = map[string]bool{
 	"reply-to":                  true,
 }
 
+// bodyChangingOps lists patch operations that modify the HTML body content,
+// which is the trigger for running local image path resolution.
+var bodyChangingOps = map[string]bool{
+	"set_body":       true,
+	"set_reply_body": true,
+	"replace_body":   true,
+	"append_body":    true,
+}
+
 func Apply(snapshot *DraftSnapshot, patch Patch) error {
 	if err := patch.Validate(); err != nil {
 		return err
 	}
+	hasBodyChange := false
 	for _, op := range patch.Ops {
 		if err := applyOp(snapshot, op, patch.Options); err != nil {
 			return err
 		}
+		if bodyChangingOps[op.Op] {
+			hasBodyChange = true
+		}
 	}
-	if err := postProcessInlineImages(snapshot); err != nil {
+	if err := postProcessInlineImages(snapshot, hasBodyChange); err != nil {
 		return err
 	}
 	return refreshSnapshot(snapshot)
@@ -620,7 +633,7 @@ func replaceInline(snapshot *DraftSnapshot, partID, path, cid, fileName, content
 	contentType = detectedCT
 	contentType, mediaParams := normalizedDetectedMediaType(contentType)
 	finalCID := strings.Trim(strings.TrimSpace(cid), "<>")
-	if err := validate.RejectCRLF(finalCID, "inline cid"); err != nil {
+	if err := validateCID(finalCID); err != nil {
 		return err
 	}
 	if err := validate.RejectCRLF(fileName, "inline filename"); err != nil {
@@ -745,6 +758,21 @@ func findPart(root *Part, partID string) *Part {
 	return nil
 }
 
+// validateCID checks that a Content-ID value is non-empty and free of
+// characters that would break MIME headers or cause ambiguous references.
+func validateCID(cid string) error {
+	if cid == "" {
+		return fmt.Errorf("inline cid is empty")
+	}
+	if err := validate.RejectCRLF(cid, "inline cid"); err != nil {
+		return err
+	}
+	if strings.ContainsAny(cid, " \t<>()") {
+		return fmt.Errorf("inline cid %q contains invalid characters (spaces, tabs, angle brackets, or parentheses are not allowed)", cid)
+	}
+	return nil
+}
+
 func ensureInlineContainerRef(partRef **Part) (*Part, error) {
 	if partRef == nil || *partRef == nil {
 		return nil, fmt.Errorf("body container is nil")
@@ -770,14 +798,8 @@ func newInlinePart(path string, content []byte, cid, fileName, contentType strin
 	contentType, mediaParams := normalizedDetectedMediaType(contentType)
 	mediaParams["name"] = fileName
 	cid = strings.Trim(strings.TrimSpace(cid), "<>")
-	if cid == "" {
-		return nil, fmt.Errorf("inline cid is empty")
-	}
-	if err := validate.RejectCRLF(cid, "inline cid"); err != nil {
+	if err := validateCID(cid); err != nil {
 		return nil, err
-	}
-	if strings.ContainsAny(cid, " \t<>()") {
-		return nil, fmt.Errorf("inline cid %q contains invalid characters (spaces, tabs, angle brackets, or parentheses are not allowed)", cid)
 	}
 	if err := validate.RejectCRLF(fileName, "inline filename"); err != nil {
 		return nil, err
@@ -1048,27 +1070,34 @@ func FindOrphanedCIDs(html string, addedCIDs []string) []string {
 }
 
 // postProcessInlineImages is the unified post-processing step that:
-//  1. Resolves local <img src="./path"> to inline CID parts.
+//  1. Resolves local <img src="./path"> to inline CID parts (only when resolveLocal is true).
 //  2. Validates all CID references in HTML resolve to MIME parts.
 //  3. Removes orphaned inline MIME parts no longer referenced by HTML.
+//
+// resolveLocal should be true only when a body-changing op was applied;
+// metadata-only edits skip local path resolution to avoid disk I/O side effects.
 //
 // NOTE: The EML builder path has an equivalent function processInlineImagesForEML
 // in shortcuts/mail/helpers.go. When adding new validation or processing logic here,
 // update processInlineImagesForEML as well (or extract a shared function).
-func postProcessInlineImages(snapshot *DraftSnapshot) error {
+func postProcessInlineImages(snapshot *DraftSnapshot, resolveLocal bool) error {
 	htmlPart := findPrimaryBodyPart(snapshot.Body, "text/html")
 	if htmlPart == nil {
 		return nil
 	}
 
 	origHTML := string(htmlPart.Body)
-	html, err := resolveLocalImgSrc(snapshot, origHTML)
-	if err != nil {
-		return err
-	}
-	if html != origHTML {
-		htmlPart.Body = []byte(html)
-		htmlPart.Dirty = true
+	html := origHTML
+	if resolveLocal {
+		var err error
+		html, err = resolveLocalImgSrc(snapshot, origHTML)
+		if err != nil {
+			return err
+		}
+		if html != origHTML {
+			htmlPart.Body = []byte(html)
+			htmlPart.Dirty = true
+		}
 	}
 
 	// Collect all CIDs present as MIME parts.

@@ -652,6 +652,23 @@ func TestReplaceInlineRejectsCRLFInCID(t *testing.T) {
 	}
 }
 
+func TestReplaceInlineRejectsInvalidCIDChars(t *testing.T) {
+	fixtureData := mustReadFixture(t, "testdata/html_inline_draft.eml")
+	chdirTemp(t)
+	if err := os.WriteFile("updated.png", []byte{0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A}, 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	snapshot := mustParseFixtureDraft(t, fixtureData)
+	for _, bad := range []string{"my logo", "a\tb", "cid<x>", "cid(x)"} {
+		err := Apply(snapshot, Patch{
+			Ops: []PatchOp{{Op: "replace_inline", Target: AttachmentTarget{PartID: "1.2"}, Path: "updated.png", CID: bad}},
+		})
+		if err == nil {
+			t.Errorf("expected error for CID %q, got nil", bad)
+		}
+	}
+}
+
 func TestReplaceInlineRejectsCRLFInFileName(t *testing.T) {
 	fixtureData := mustReadFixture(t, "testdata/html_inline_draft.eml")
 	chdirTemp(t)

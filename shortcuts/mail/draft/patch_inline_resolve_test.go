@@ -950,3 +950,30 @@ func TestSetBodyReplacesOrphanedInlineUnderMixed(t *testing.T) {
 		t.Errorf("new inline part with CID %q should exist", newCID)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Metadata-only edit must NOT trigger local path resolution
+// ---------------------------------------------------------------------------
+
+// TestMetadataEditSkipsLocalPathResolve ensures that a pure metadata edit
+// (set_subject) does not attempt to resolve <img src="./..."> paths from
+// disk. If the HTML happens to contain a local path (e.g. from an external
+// client), the edit should still succeed without file I/O.
+func TestMetadataEditSkipsLocalPathResolve(t *testing.T) {
+	// Draft HTML contains a local path that does NOT exist on disk.
+	// A body-changing op would fail trying to read this file.
+	snapshot := mustParseFixtureDraft(t, `Subject: Original
+From: Alice <alice@example.com>
+To: Bob <bob@example.com>
+MIME-Version: 1.0
+Content-Type: text/html; charset=UTF-8
+
+<div>Hello<img src="./nonexistent-image.png" /></div>
+`)
+	err := Apply(snapshot, Patch{
+		Ops: []PatchOp{{Op: "set_subject", Value: "Updated subject"}},
+	})
+	if err != nil {
+		t.Fatalf("metadata-only edit should not trigger local path resolution, got: %v", err)
+	}
+}
