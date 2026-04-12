@@ -330,7 +330,7 @@ func printTriageFilterSchema(runtime *common.RuntimeContext) {
 			},
 			"label_id": map[string]string{
 				"type":    "string",
-				"desc":    "Label ID (takes priority over label). Custom labels use numeric IDs from the label list API.",
+				"desc":    "Label ID (takes priority over label). System label IDs: FLAGGED, SCHEDULED (for scheduled-send emails). Custom labels use numeric IDs from the label list API.",
 				"example": "7543462602685287954",
 			},
 			"from": map[string]string{

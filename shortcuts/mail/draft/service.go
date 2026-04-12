@@ -63,6 +63,12 @@ func Send(runtime *common.RuntimeContext, mailboxID, draftID string) (map[string
 	return runtime.CallAPI("POST", mailboxPath(mailboxID, "drafts", draftID, "send"), nil, nil)
 }
 
+// SendWithBody sends a draft with an optional request body (e.g. for scheduled send).
+// If body is nil, behaves identically to Send.
+func SendWithBody(runtime *common.RuntimeContext, mailboxID, draftID string, body map[string]interface{}) (map[string]interface{}, error) {
+	return runtime.CallAPI("POST", mailboxPath(mailboxID, "drafts", draftID, "send"), nil, body)
+}
+
 func extractDraftID(data map[string]interface{}) string {
 	if id, ok := data["draft_id"].(string); ok && strings.TrimSpace(id) != "" {
 		return strings.TrimSpace(id)

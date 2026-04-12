@@ -52,6 +52,14 @@ lark-cli mail +send --to alice@example.com --subject '预览图' --body '<img sr
 # 纯文本邮件（仅在内容极简时使用）
 lark-cli mail +send --to alice@example.com --subject '确认' --body '收到，谢谢'
 
+# 定时发送（创建草稿后 1 小时发送）
+lark-cli mail +send --to alice@example.com --subject '周报' \
+  --body '<p>本周进展</p>' --confirm-send --send-after 1h
+
+# 定时发送（指定绝对 Unix 时间戳）
+lark-cli mail +send --to alice@example.com --subject '周报' \
+  --body '<p>本周进展</p>' --confirm-send --send-time 1775846400
+
 # Dry Run（仅打印请求，不执行）
 lark-cli mail +send --to alice@example.com --subject '测试' --body '<p>test</p>' --dry-run
 ```
@@ -71,6 +79,8 @@ lark-cli mail +send --to alice@example.com --subject '测试' --body '<p>test</p
 | `--attach <paths>` | 否 | 附件文件路径，多个用逗号分隔。相对路径 |
 | `--inline <json>` | 否 | 高级用法：手动指定内嵌图片 CID 映射。推荐直接在 `--body` 中使用 `<img src="./path" />`（自动解析）。仅在需要精确控制 CID 命名时使用此参数。格式：`'[{"cid":"mycid","file_path":"./logo.png"}]'`，在 body 中用 `<img src="cid:mycid">` 引用。不可与 `--plain-text` 同时使用 |
 | `--confirm-send` | 否 | 确认发送邮件（默认只保存草稿）。仅在用户明确确认收件人和内容后使用 |
+| `--send-time <unix>` | 否 | 定时发送的绝对时间（Unix 秒）。仅在 `--confirm-send` 模式下生效。至少 5 分钟后。 |
+| `--send-after <dur>` | 否 | 定时发送的相对时间（如 30m、2h、1d）。仅在 `--confirm-send` 模式下生效。至少 5 分钟后。 |
 | `--dry-run` | 否 | 仅打印请求，不执行 |
 
 ## 返回值

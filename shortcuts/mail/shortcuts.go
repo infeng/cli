@@ -18,6 +18,8 @@ func Shortcuts() []common.Shortcut {
 		MailSend,
 		MailDraftCreate,
 		MailDraftEdit,
+		MailDraftSend,
 		MailForward,
+		MailCancelScheduledSend,
 	}
 }

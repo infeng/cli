@@ -6,6 +6,7 @@ package mail
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/larksuite/cli/shortcuts/common"
@@ -32,6 +33,8 @@ var MailSend = common.Shortcut{
 		{Name: "attach", Desc: "Attachment file path(s), comma-separated (relative path only)"},
 		{Name: "inline", Desc: "Inline images as a JSON array. Each entry: {\"cid\":\"<unique-id>\",\"file_path\":\"<relative-path>\"}. All file_path values must be relative paths. Cannot be used with --plain-text. CID images are embedded via <img src=\"cid:...\"> in the HTML body. CID is a unique identifier, e.g. a random hex string like \"a1b2c3d4e5f6a7b8c9d0\"."},
 		{Name: "confirm-send", Type: "bool", Desc: "Send the email immediately instead of saving as draft. Only use after the user has explicitly confirmed recipients and content."},
+		{Name: "send-time", Desc: "Optional. Unix timestamp in seconds for scheduled sending. Only effective with --confirm-send. Must be at least 5 minutes from now."},
+		{Name: "send-after", Desc: "Optional. Relative duration from now (e.g. 30m, 2h, 1d) for scheduled sending. Only effective with --confirm-send. Must result in at least 5 minutes from now."},
 	},
 	DryRun: func(ctx context.Context, runtime *common.RuntimeContext) *common.DryRunAPI {
 		to := runtime.Str("to")
@@ -145,14 +148,32 @@ var MailSend = common.Shortcut{
 			hintSendDraft(runtime, mailboxID, draftID)
 			return nil
 		}
-		resData, err := draftpkg.Send(runtime, mailboxID, draftID)
+		sendTime, stErr := resolveScheduledSendTime(runtime)
+		if stErr != nil {
+			return stErr
+		}
+
+		var resData map[string]interface{}
+		if sendTime > 0 {
+			body := map[string]interface{}{
+				"send_time": strconv.FormatInt(sendTime, 10),
+			}
+			resData, err = draftpkg.SendWithBody(runtime, mailboxID, draftID, body)
+		} else {
+			resData, err = draftpkg.Send(runtime, mailboxID, draftID)
+		}
 		if err != nil {
 			return fmt.Errorf("failed to send email (draft %s created but not sent): %w", draftID, err)
 		}
-		runtime.Out(map[string]interface{}{
+		out := map[string]interface{}{
 			"message_id": resData["message_id"],
 			"thread_id":  resData["thread_id"],
-		}, nil)
+		}
+		if sendTime > 0 {
+			out["scheduled"] = true
+			out["send_time"] = strconv.FormatInt(sendTime, 10)
+		}
+		runtime.Out(out, nil)
 		return nil
 	},
 }
