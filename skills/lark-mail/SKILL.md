@@ -17,6 +17,7 @@ metadata:
 - **邮件（Message）**：一封具体的邮件，包含发件人、收件人、主题、正文（纯文本/HTML）、附件。每封邮件有唯一 `message_id`。
 - **会话（Thread）**：同一主题的邮件链，包含原始邮件和所有回复/转发。通过 `thread_id` 关联。
 - **草稿（Draft）**：未发送的邮件。所有发送类命令默认保存为草稿，加 `--confirm-send` 才实际发送。
+- **定时发送（Scheduled Send）**：草稿可以设置定时发送。使用 `+draft-send --send-time <unix_seconds>` 或 `--send-after <duration>` 将草稿从 DRAFT 状态转为 SCHEDULED 状态。定时发送的邮件在到达指定时间后自动发送，变为 SENT 状态。可通过 `+cancel-scheduled-send` 取消，邮件退回 DRAFT 状态。状态机：DRAFT -> SCHEDULED -> SENT（或 SCHEDULED -> DRAFT via cancel）。
 - **文件夹（Folder）**：邮件的组织容器。内置文件夹：`INBOX`、`SENT`、`DRAFT`、`SCHEDULED`、`TRASH`、`SPAM`、`ARCHIVED`，也可自定义。
 - **标签（Label）**：邮件的分类标记，内置标签如 `FLAGGED`（星标）。一封邮件可有多个标签。
 - **附件（Attachment）**：分为普通附件和内嵌图片（inline，通过 CID 引用）。
@@ -58,6 +59,9 @@ metadata:
 6. **新邮件** — `+send` 存草稿（默认），加 `--confirm-send` 发送
 7. **确认投递** — 发送后用 `send_status` 查询投递状态，向用户报告结果
 8. **编辑草稿** — `+draft-edit` 修改已有草稿。正文编辑通过 `--patch-file`：回复/转发草稿用 `set_reply_body` op 保留引用区，普通草稿用 `set_body` op
+9. **定时发送** — `+draft-send --draft-id DR_xxx --send-after 1h` 将草稿设为 1 小时后发送；或用 `--send-time <unix_seconds>` 指定绝对时间
+10. **取消定时发送** — `+cancel-scheduled-send --message-id MSG_xxx` 取消处于 SCHEDULED 状态的邮件，退回草稿
+11. **查看定时发送邮件** — `+triage --filter '{"folder":"scheduled"}'` 列出所有 SCHEDULED 状态的邮件
 
 ### CRITICAL — 首次使用任何命令前先查 `-h`
 

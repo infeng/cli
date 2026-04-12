@@ -44,6 +44,9 @@
 6. **新邮件** — `+send` 存草稿（默认），加 `--confirm-send` 发送
 7. **确认投递** — 发送后用 `send_status` 查询投递状态，向用户报告结果
 8. **编辑草稿** — `+draft-edit` 修改已有草稿。正文编辑通过 `--patch-file`：回复/转发草稿用 `set_reply_body` op 保留引用区，普通草稿用 `set_body` op
+9. **定时发送** — `+draft-send --draft-id DR_xxx --send-after 1h` 将草稿设为 1 小时后发送；或用 `--send-time <unix_seconds>` 指定绝对时间。`+send --confirm-send --send-after 2h` 也可在创建+发送组合流程中使用定时发送。
+10. **取消定时发送** — `+cancel-scheduled-send --message-id MSG_xxx` 取消处于 SCHEDULED 状态的邮件，退回草稿
+11. **查看定时发送邮件** — `+triage --filter '{"folder":"scheduled"}'` 列出所有 SCHEDULED 状态的邮件
 
 ### CRITICAL — 首次使用任何命令前先查 `-h`
 

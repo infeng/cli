@@ -13,8 +13,10 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -1004,5 +1006,133 @@ func TestValidateComposeHasAtLeastOneRecipient_AlsoChecksCount(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "exceeds the limit") {
 		t.Fatalf("unexpected error message: %v", err)
+	}
+}
+
+// newScheduledSendRuntime creates a RuntimeContext with --send-time, --send-after, and --mailbox flags.
+func newScheduledSendRuntime(sendTime, sendAfter string) *common.RuntimeContext {
+	cmd := &cobra.Command{Use: "test"}
+	cmd.Flags().String("send-time", "", "")
+	cmd.Flags().String("send-after", "", "")
+	cmd.Flags().String("mailbox", "me", "")
+	if sendTime != "" {
+		_ = cmd.Flags().Set("send-time", sendTime)
+	}
+	if sendAfter != "" {
+		_ = cmd.Flags().Set("send-after", sendAfter)
+	}
+	io := &cmdutil.IOStreams{
+		Out:    &bytes.Buffer{},
+		ErrOut: &bytes.Buffer{},
+	}
+	return &common.RuntimeContext{
+		Cmd:     cmd,
+		Factory: &cmdutil.Factory{IOStreams: io},
+	}
+}
+
+func TestResolveScheduledSendTime_Empty(t *testing.T) {
+	rt := newScheduledSendRuntime("", "")
+	ts, err := resolveScheduledSendTime(rt)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ts != 0 {
+		t.Fatalf("expected 0 for immediate send, got %d", ts)
+	}
+}
+
+func TestResolveScheduledSendTime_Absolute(t *testing.T) {
+	futureTS := time.Now().Unix() + 10*60 // 10 minutes from now
+	rt := newScheduledSendRuntime(strconv.FormatInt(futureTS, 10), "")
+	ts, err := resolveScheduledSendTime(rt)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ts != futureTS {
+		t.Fatalf("expected %d, got %d", futureTS, ts)
+	}
+}
+
+func TestResolveScheduledSendTime_AbsoluteInvalid(t *testing.T) {
+	rt := newScheduledSendRuntime("not-a-number", "")
+	_, err := resolveScheduledSendTime(rt)
+	if err == nil {
+		t.Fatal("expected error for non-numeric --send-time")
+	}
+	if !strings.Contains(err.Error(), "positive unix timestamp") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestResolveScheduledSendTime_AbsoluteTooSoon(t *testing.T) {
+	tooSoonTS := time.Now().Unix() + 60 // only 1 minute from now
+	rt := newScheduledSendRuntime(strconv.FormatInt(tooSoonTS, 10), "")
+	_, err := resolveScheduledSendTime(rt)
+	if err == nil {
+		t.Fatal("expected error for timestamp less than 5 minutes from now")
+	}
+	if !strings.Contains(err.Error(), "at least 5 minutes") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestResolveScheduledSendTime_Relative(t *testing.T) {
+	rt := newScheduledSendRuntime("", "10m")
+	ts, err := resolveScheduledSendTime(rt)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	expected := time.Now().Add(10 * time.Minute).Unix()
+	// allow 2 second tolerance for test execution time
+	if ts < expected-2 || ts > expected+2 {
+		t.Fatalf("expected ~%d, got %d", expected, ts)
+	}
+}
+
+func TestResolveScheduledSendTime_RelativeTooShort(t *testing.T) {
+	rt := newScheduledSendRuntime("", "30s")
+	_, err := resolveScheduledSendTime(rt)
+	if err == nil {
+		t.Fatal("expected error for duration less than 5 minutes")
+	}
+	if !strings.Contains(err.Error(), "at least 5 minutes") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestResolveScheduledSendTime_RelativeDays(t *testing.T) {
+	rt := newScheduledSendRuntime("", "1d")
+	ts, err := resolveScheduledSendTime(rt)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	expected := time.Now().Add(24 * time.Hour).Unix()
+	if ts < expected-2 || ts > expected+2 {
+		t.Fatalf("expected ~%d, got %d", expected, ts)
+	}
+}
+
+func TestResolveScheduledSendTime_Conflict(t *testing.T) {
+	futureTS := time.Now().Unix() + 10*60
+	rt := newScheduledSendRuntime(strconv.FormatInt(futureTS, 10), "2h")
+	ts, err := resolveScheduledSendTime(rt)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// --send-time should take priority
+	if ts != futureTS {
+		t.Fatalf("expected --send-time value %d to take priority, got %d", futureTS, ts)
+	}
+}
+
+func TestParseSendAfterDuration_InvalidDay(t *testing.T) {
+	_, err := parseSendAfterDuration("0d")
+	if err == nil {
+		t.Fatal("expected error for 0d")
+	}
+	_, err = parseSendAfterDuration("abcd")
+	if err == nil {
+		t.Fatal("expected error for invalid duration")
 	}
 }

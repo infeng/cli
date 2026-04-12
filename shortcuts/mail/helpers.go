@@ -17,6 +17,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/larksuite/cli/extension/fileio"
 	"github.com/larksuite/cli/internal/auth"
@@ -2015,4 +2016,59 @@ func validateComposeInlineAndAttachments(fio fileio.FileIO, attachFlag, inlineFl
 	}
 	allFiles := append(splitByComma(attachFlag), inlineSpecFilePaths(inlineSpecs)...)
 	return checkAttachmentSizeLimit(fio, allFiles, 0)
+}
+
+// resolveScheduledSendTime parses --send-time / --send-after flags and returns
+// a Unix timestamp in seconds. Returns 0 for immediate send (no flags set).
+// --send-time takes priority over --send-after. If both are given, --send-time
+// wins and a warning is printed to stderr.
+func resolveScheduledSendTime(runtime *common.RuntimeContext) (int64, error) {
+	sendTime := runtime.Str("send-time")
+	sendAfter := runtime.Str("send-after")
+
+	if sendTime != "" && sendAfter != "" {
+		fmt.Fprintln(runtime.IO().ErrOut, "warning: both --send-time and --send-after specified; using --send-time")
+	}
+
+	if sendTime != "" {
+		ts, err := strconv.ParseInt(sendTime, 10, 64)
+		if err != nil || ts <= 0 {
+			return 0, output.ErrValidation("--send-time must be a positive unix timestamp in seconds")
+		}
+		return ts, validateMinScheduleDelay(ts)
+	}
+
+	if sendAfter != "" {
+		dur, err := parseSendAfterDuration(sendAfter)
+		if err != nil {
+			return 0, output.ErrValidation("--send-after invalid duration: %v", err)
+		}
+		ts := time.Now().Add(dur).Unix()
+		return ts, validateMinScheduleDelay(ts)
+	}
+
+	return 0, nil // immediate send
+}
+
+// parseSendAfterDuration parses a duration string, extending time.ParseDuration
+// to also support "d" suffix for days (e.g. "1d" = 24h).
+func parseSendAfterDuration(s string) (time.Duration, error) {
+	if strings.HasSuffix(s, "d") {
+		numStr := strings.TrimSuffix(s, "d")
+		days, err := strconv.Atoi(numStr)
+		if err != nil || days <= 0 {
+			return 0, fmt.Errorf("invalid day value %q", s)
+		}
+		return time.Duration(days) * 24 * time.Hour, nil
+	}
+	return time.ParseDuration(s)
+}
+
+// validateMinScheduleDelay ensures the scheduled send time is at least 5 minutes
+// from now. This is a client-side courtesy check aligned with the backend constraint.
+func validateMinScheduleDelay(ts int64) error {
+	if ts < time.Now().Unix()+5*60 {
+		return output.ErrValidation("scheduled send must be at least 5 minutes from now")
+	}
+	return nil
 }
