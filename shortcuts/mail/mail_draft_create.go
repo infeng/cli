@@ -192,7 +192,11 @@ func buildRawEMLForDraftCreate(ctx context.Context, runtime *common.RuntimeConte
 	}
 	allInlinePaths := append(inlineSpecFilePaths(inlineSpecs), autoResolvedPaths...)
 	emlBase := estimateEMLBaseSize(runtime.FileIO(), int64(len(input.Body)), allInlinePaths, 0)
-	bld, err = processLargeAttachments(ctx, runtime, bld, splitByComma(input.Attach), emlBase, 0)
+	htmlBody := input.Body
+	if !bodyIsHTML(htmlBody) {
+		htmlBody = ""
+	}
+	bld, err = processLargeAttachments(ctx, runtime, bld, htmlBody, splitByComma(input.Attach), emlBase, 0)
 	if err != nil {
 		return "", err
 	}
