@@ -140,6 +140,7 @@ var MailForward = common.Shortcut{
 		var autoResolvedPaths []string
 		var composedHTMLBody string
 		var composedTextBody string
+		var srcInlineBytes int64
 		if useHTML {
 			if err := validateInlineImageURLs(sourceMsg); err != nil {
 				return fmt.Errorf("forward blocked: %w", err)
@@ -156,7 +157,7 @@ var MailForward = common.Shortcut{
 			}
 			forwardQuote := buildForwardQuoteHTML(&orig)
 			var srcCIDs []string
-			bld, srcCIDs, err = addInlineImagesToBuilder(runtime, bld, sourceMsg.InlineImages)
+			bld, srcCIDs, srcInlineBytes, err = addInlineImagesToBuilder(runtime, bld, sourceMsg.InlineImages)
 			if err != nil {
 				return err
 			}
@@ -216,7 +217,8 @@ var MailForward = common.Shortcut{
 		// original attachments exceeding the EML limit are uploaded as large
 		// attachments instead of being embedded.
 		allInlinePaths := append(inlineSpecFilePaths(inlineSpecs), autoResolvedPaths...)
-		emlBase := estimateEMLBaseSize(runtime.FileIO(), int64(len(body)), allInlinePaths, 0)
+		composedBodySize := int64(len(composedHTMLBody) + len(composedTextBody))
+		emlBase := estimateEMLBaseSize(runtime.FileIO(), composedBodySize, allInlinePaths, srcInlineBytes)
 
 		var allFiles []attachmentFile
 		for i, att := range origAtts {

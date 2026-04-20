@@ -141,12 +141,13 @@ var MailReply = common.Shortcut{
 		var autoResolvedPaths []string
 		var composedHTMLBody string
 		var composedTextBody string
+		var srcInlineBytes int64
 		if useHTML {
 			if err := validateInlineImageURLs(sourceMsg); err != nil {
 				return fmt.Errorf("HTML reply blocked: %w", err)
 			}
 			var srcCIDs []string
-			bld, srcCIDs, err = addInlineImagesToBuilder(runtime, bld, sourceMsg.InlineImages)
+			bld, srcCIDs, srcInlineBytes, err = addInlineImagesToBuilder(runtime, bld, sourceMsg.InlineImages)
 			if err != nil {
 				return err
 			}
@@ -179,7 +180,8 @@ var MailReply = common.Shortcut{
 			bld = bld.TextBody([]byte(composedTextBody))
 		}
 		allInlinePaths := append(inlineSpecFilePaths(inlineSpecs), autoResolvedPaths...)
-		emlBase := estimateEMLBaseSize(runtime.FileIO(), int64(len(body)), allInlinePaths, 0)
+		composedBodySize := int64(len(composedHTMLBody) + len(composedTextBody))
+		emlBase := estimateEMLBaseSize(runtime.FileIO(), composedBodySize, allInlinePaths, srcInlineBytes)
 		bld, err = processLargeAttachments(ctx, runtime, bld, composedHTMLBody, composedTextBody, splitByComma(attachFlag), emlBase, 0)
 		if err != nil {
 			return err
