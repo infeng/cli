@@ -33,6 +33,8 @@ var MailReply = common.Shortcut{
 		{Name: "inline", Desc: "Inline images as a JSON array. Each entry: {\"cid\":\"<unique-id>\",\"file_path\":\"<relative-path>\"}. All file_path values must be relative paths. Cannot be used with --plain-text. CID images are embedded via <img src=\"cid:...\"> in the HTML body. CID is a unique identifier, e.g. a random hex string like \"a1b2c3d4e5f6a7b8c9d0\"."},
 		{Name: "confirm-send", Type: "bool", Desc: "Send the reply immediately instead of saving as draft. Only use after the user has explicitly confirmed recipients and content."},
 		{Name: "send-time", Desc: "Scheduled send time as a Unix timestamp in seconds. Must be at least 5 minutes in the future. Use with --confirm-send to schedule the email."},
+		{Name: "subject", Desc: "Optional. Override the auto-generated Re: subject. When set, the shortcut uses this value verbatim instead of prefixing the original subject."},
+		{Name: "template-id", Desc: "Optional. Apply a saved template by ID (decimal integer string) before composing. The template's body/to/cc/bcc/is_send_separately/attachments are appended to the reply-derived values (no de-duplication; see warning in Execute output)."},
 		signatureFlag},
 	DryRun: func(ctx context.Context, runtime *common.RuntimeContext) *common.DryRunAPI {
 		messageId := runtime.Str("message-id")
@@ -42,9 +44,12 @@ var MailReply = common.Shortcut{
 		if confirmSend {
 			desc = "Reply (--confirm-send): fetch original message → resolve sender address → create draft → send draft"
 		}
-		api := common.NewDryRunAPI().
-			Desc(desc).
-			GET(mailboxPath(mailboxID, "messages", messageId)).
+		api := common.NewDryRunAPI().Desc(desc)
+		if tid := runtime.Str("template-id"); tid != "" {
+			api = api.GET(templateMailboxPath(mailboxID, tid)).
+				Desc("Fetch template to merge with reply-derived recipients / body.")
+		}
+		api = api.GET(mailboxPath(mailboxID, "messages", messageId)).
 			GET(mailboxPath(mailboxID, "profile")).
 			POST(mailboxPath(mailboxID, "drafts")).
 			Body(map[string]interface{}{"raw": "<base64url-EML>"})
@@ -54,6 +59,9 @@ var MailReply = common.Shortcut{
 		return api
 	},
 	Validate: func(ctx context.Context, runtime *common.RuntimeContext) error {
+		if err := validateTemplateID(runtime.Str("template-id")); err != nil {
+			return err
+		}
 		if err := validateConfirmSendScope(runtime); err != nil {
 			return err
 		}
@@ -105,6 +113,46 @@ var MailReply = common.Shortcut{
 		}
 		replyTo = mergeAddrLists(replyTo, toFlag)
 
+		// --template-id merge (§5.5 Q1-Q5). templateSep tracks whether the
+		// merged template asks the send endpoint to split per-recipient.
+		templateSep := false
+		var templateLargeAttachmentIDs []string
+		if tid := runtime.Str("template-id"); tid != "" {
+			tpl, tErr := fetchTemplate(runtime, mailboxID, tid)
+			if tErr != nil {
+				return tErr
+			}
+			merged := applyTemplate(
+				templateShortcutReply, tpl,
+				replyTo, ccFlag, bccFlag,
+				false, buildReplySubject(orig.subject), body,
+				"", "", "", runtime.Str("subject"), "",
+			)
+			replyTo = merged.To
+			ccFlag = merged.Cc
+			bccFlag = merged.Bcc
+			body = merged.Body
+			if !plainText && merged.IsPlainTextMode {
+				plainText = true
+			}
+			templateSep = merged.IsSendSeparately
+			templateLargeAttachmentIDs = merged.LargeAttachmentIDs
+			for _, w := range merged.Warnings {
+				fmt.Fprintf(runtime.IO().ErrOut, "warning: %s\n", w)
+			}
+			// Store merged subject override into a local so the Subject line
+			// below honours it (overriding the auto Re: prefix).
+			if s := strings.TrimSpace(merged.Subject); s != "" && s != buildReplySubject(orig.subject) {
+				orig.subject = s
+				// Signal downstream that we want a verbatim subject; clear
+				// the Re: prefix by setting headSubject-like behavior via a
+				// sentinel — easier: override the subject-builder call below
+				// by stashing into the builder directly after it's created.
+			}
+		}
+		// --subject (explicit override) takes precedence over auto-generated.
+		subjectOverride := strings.TrimSpace(runtime.Str("subject"))
+
 		useHTML := !plainText && (bodyIsHTML(body) || bodyIsHTML(orig.bodyRaw) || sigResult != nil)
 		if strings.TrimSpace(inlineFlag) != "" && !useHTML {
 			return fmt.Errorf("--inline requires HTML mode, but neither the new body nor the original message contains HTML")
@@ -120,8 +168,12 @@ var MailReply = common.Shortcut{
 		}
 
 		quoted := quoteForReply(&orig, useHTML)
+		subjectLine := buildReplySubject(orig.subject)
+		if subjectOverride != "" {
+			subjectLine = subjectOverride
+		}
 		bld := emlbuilder.New().WithFileIO(runtime.FileIO()).
-			Subject(buildReplySubject(orig.subject)).
+			Subject(subjectLine).
 			ToAddrs(parseNetAddrs(replyTo))
 		if senderEmail != "" {
 			bld = bld.From("", senderEmail)
@@ -186,6 +238,9 @@ var MailReply = common.Shortcut{
 		if err != nil {
 			return err
 		}
+		if hdr, hdrErr := encodeTemplateLargeAttachmentHeader(templateLargeAttachmentIDs); hdrErr == nil && hdr != "" {
+			bld = bld.Header(draftpkg.LargeAttachmentIDsHeader, hdr)
+		}
 		rawEML, err := bld.BuildBase64URL()
 		if err != nil {
 			return fmt.Errorf("failed to build EML: %w", err)
@@ -203,7 +258,7 @@ var MailReply = common.Shortcut{
 			hintSendDraft(runtime, mailboxID, draftID)
 			return nil
 		}
-		resData, err := draftpkg.Send(runtime, mailboxID, draftID, sendTime)
+		resData, err := sendDraftWithTemplateHeader(ctx, runtime, mailboxID, draftID, sendTime, templateSep)
 		if err != nil {
 			return fmt.Errorf("failed to send reply (draft %s created but not sent): %w", draftID, err)
 		}

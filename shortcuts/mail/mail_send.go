@@ -33,6 +33,7 @@ var MailSend = common.Shortcut{
 		{Name: "inline", Desc: "Inline images as a JSON array. Each entry: {\"cid\":\"<unique-id>\",\"file_path\":\"<relative-path>\"}. All file_path values must be relative paths. Cannot be used with --plain-text. CID images are embedded via <img src=\"cid:...\"> in the HTML body. CID is a unique identifier, e.g. a random hex string like \"a1b2c3d4e5f6a7b8c9d0\"."},
 		{Name: "confirm-send", Type: "bool", Desc: "Send the email immediately instead of saving as draft. Only use after the user has explicitly confirmed recipients and content."},
 		{Name: "send-time", Desc: "Scheduled send time as a Unix timestamp in seconds. Must be at least 5 minutes in the future. Use with --confirm-send to schedule the email."},
+		{Name: "template-id", Desc: "Optional. Apply a saved template by ID (decimal integer string) before composing. The template's subject/body/to/cc/bcc/is_send_separately/attachments are merged with user-supplied flags (user flags win). Requires --as user."},
 		signatureFlag},
 	DryRun: func(ctx context.Context, runtime *common.RuntimeContext) *common.DryRunAPI {
 		to := runtime.Str("to")
@@ -43,9 +44,12 @@ var MailSend = common.Shortcut{
 		if confirmSend {
 			desc = "Compose email → save as draft → send draft"
 		}
-		api := common.NewDryRunAPI().
-			Desc(desc).
-			GET(mailboxPath(mailboxID, "profile")).
+		api := common.NewDryRunAPI().Desc(desc)
+		if tid := runtime.Str("template-id"); tid != "" {
+			api = api.GET(templateMailboxPath(mailboxID, tid)).
+				Desc("Fetch template to merge with compose flags (subject/body/to/cc/bcc/attachments).")
+		}
+		api = api.GET(mailboxPath(mailboxID, "profile")).
 			POST(mailboxPath(mailboxID, "drafts")).
 			Body(map[string]interface{}{
 				"raw": "<base64url-EML>",
@@ -60,6 +64,9 @@ var MailSend = common.Shortcut{
 		return api
 	},
 	Validate: func(ctx context.Context, runtime *common.RuntimeContext) error {
+		if err := validateTemplateID(runtime.Str("template-id")); err != nil {
+			return err
+		}
 		if err := validateComposeHasAtLeastOneRecipient(runtime.Str("to"), runtime.Str("cc"), runtime.Str("bcc")); err != nil {
 			return err
 		}
@@ -87,6 +94,36 @@ var MailSend = common.Shortcut{
 		signatureID := runtime.Str("signature-id")
 
 		mailboxID := resolveComposeMailboxID(runtime)
+
+		// --template-id merge: fetch template, apply §5.5 Q1–Q5.
+		templateSep := false
+		var templateLargeAttachmentIDs []string
+		if tid := runtime.Str("template-id"); tid != "" {
+			tpl, err := fetchTemplate(runtime, mailboxID, tid)
+			if err != nil {
+				return err
+			}
+			merged := applyTemplate(
+				templateShortcutSend, tpl,
+				"", "", "", /* no pre-existing draft addrs for +send */
+				false, "", "",
+				to, ccFlag, bccFlag, subject, body,
+			)
+			to = merged.To
+			ccFlag = merged.Cc
+			bccFlag = merged.Bcc
+			subject = merged.Subject
+			body = merged.Body
+			if !runtime.Bool("plain-text") && merged.IsPlainTextMode {
+				plainText = true
+			}
+			templateSep = merged.IsSendSeparately
+			templateLargeAttachmentIDs = merged.LargeAttachmentIDs
+			for _, w := range merged.Warnings {
+				fmt.Fprintf(runtime.IO().ErrOut, "warning: %s\n", w)
+			}
+		}
+
 		sigResult, err := resolveSignature(ctx, runtime, mailboxID, signatureID, senderEmail)
 		if err != nil {
 			return err
@@ -154,6 +191,13 @@ var MailSend = common.Shortcut{
 			return err
 		}
 
+		// Inject any template-provided LARGE attachment file_keys as an
+		// extra X-Lms-Large-Attachment-Ids header so the server references
+		// them when rendering the draft.
+		if hdr, hdrErr := encodeTemplateLargeAttachmentHeader(templateLargeAttachmentIDs); hdrErr == nil && hdr != "" {
+			bld = bld.Header(draftpkg.LargeAttachmentIDsHeader, hdr)
+		}
+
 		rawEML, err := bld.BuildBase64URL()
 		if err != nil {
 			return fmt.Errorf("failed to build EML: %w", err)
@@ -171,7 +215,7 @@ var MailSend = common.Shortcut{
 			hintSendDraft(runtime, mailboxID, draftID)
 			return nil
 		}
-		resData, err := draftpkg.Send(runtime, mailboxID, draftID, sendTime)
+		resData, err := sendDraftWithTemplateHeader(ctx, runtime, mailboxID, draftID, sendTime, templateSep)
 		if err != nil {
 			return fmt.Errorf("failed to send email (draft %s created but not sent): %w", draftID, err)
 		}
