@@ -51,13 +51,20 @@ const templateLargeSwitchThreshold int64 = 25 * 1024 * 1024
 // create/update request body. Fields align with
 // mail.open.access.v1_data_type.Attachment (id/filename/cid/is_inline/
 // attachment_type/body).
+//
+// `body` is a required field on the server (omitting it yields errno 99992402
+// `template.attachments[*].body is required`). For files the CLI has already
+// uploaded to Drive we reuse the Drive file_key as the body value — the
+// backend handler treats both `id` and `body` as the same file_key reference,
+// so sending the key twice satisfies the required-field check without forcing
+// CLI to stream the raw bytes for every inline image / attachment.
 type templateAttachment struct {
 	ID             string `json:"id,omitempty"` // Drive file_key
 	Filename       string `json:"filename,omitempty"`
 	CID            string `json:"cid,omitempty"` // only for is_inline=true
 	IsInline       bool   `json:"is_inline"`
 	AttachmentType string `json:"attachment_type,omitempty"` // "SMALL" | "LARGE"
-	Body           string `json:"body,omitempty"`            // unused by CLI compose path
+	Body           string `json:"body"`                      // required: Drive file_key (same as ID) for uploaded content
 }
 
 // templatePayload is the Template struct sent to templates.create / update.
@@ -276,6 +283,12 @@ func (b *templateAttachmentBuilder) append(fileKey, filename, cid string, isInli
 		CID:            cid,
 		IsInline:       isInline,
 		AttachmentType: aType,
+		// The server marks `body` as required (errno 99992402). Since the
+		// file was already uploaded to Drive and the handler resolves
+		// Attachment.id as the file_key, mirror the same key into body so
+		// the required-field check passes without the CLI re-reading the
+		// file bytes.
+		Body: fileKey,
 	})
 }
 

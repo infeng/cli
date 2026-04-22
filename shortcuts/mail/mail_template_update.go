@@ -185,6 +185,17 @@ var MailTemplateUpdate = common.Shortcut{
 		// file_keys), append newly uploaded ones. The EML-size/LARGE switch
 		// applies independently per call because this is a full-replace PUT.
 		tpl.Attachments = append(tpl.Attachments, newAtts...)
+		// Server rejects the PUT with errno 99992402
+		// `template.attachments[*].body is required` when any entry's
+		// `body` field is empty. Fetched entries may round-trip without
+		// the body populated (the GET response omits raw bytes). Re-fill
+		// body from the file_key (which the backend resolves identically)
+		// so full-replace updates survive the required-field check.
+		for i := range tpl.Attachments {
+			if tpl.Attachments[i].Body == "" {
+				tpl.Attachments[i].Body = tpl.Attachments[i].ID
+			}
+		}
 
 		resp, err := updateTemplate(runtime, mailboxID, tid, tpl)
 		if err != nil {
