@@ -36,6 +36,7 @@ var MailSend = common.Shortcut{
 		{Name: "confirm-send", Type: "bool", Desc: "Send the email immediately instead of saving as draft. Only use after the user has explicitly confirmed recipients and content."},
 		{Name: "send-time", Desc: "Scheduled send time as a Unix timestamp in seconds. Must be at least 5 minutes in the future. Use with --confirm-send to schedule the email."},
 		{Name: "request-receipt", Type: "bool", Desc: "Request a read receipt (Message Disposition Notification, RFC 3798) addressed to the sender. Recipient mail clients may prompt the user, send automatically, or silently ignore — delivery of a receipt is not guaranteed."},
+		{Name: "template-id", Desc: "Optional. Apply a saved template by ID (decimal integer string) before composing. The template's subject/body/to/cc/bcc/attachments are merged with user-supplied flags (user flags win). Requires --as user."},
 		signatureFlag,
 		priorityFlag},
 	DryRun: func(ctx context.Context, runtime *common.RuntimeContext) *common.DryRunAPI {
@@ -47,9 +48,12 @@ var MailSend = common.Shortcut{
 		if confirmSend {
 			desc = "Compose email → save as draft → send draft"
 		}
-		api := common.NewDryRunAPI().
-			Desc(desc).
-			GET(mailboxPath(mailboxID, "profile")).
+		api := common.NewDryRunAPI().Desc(desc)
+		if tid := runtime.Str("template-id"); tid != "" {
+			api = api.GET(templateMailboxPath(mailboxID, tid)).
+				Desc("Fetch template to merge with compose flags (subject/body/to/cc/bcc/attachments).")
+		}
+		api = api.GET(mailboxPath(mailboxID, "profile")).
 			POST(mailboxPath(mailboxID, "drafts")).
 			Body(map[string]interface{}{
 				"raw": "<base64url-EML>",
@@ -64,6 +68,9 @@ var MailSend = common.Shortcut{
 		return api
 	},
 	Validate: func(ctx context.Context, runtime *common.RuntimeContext) error {
+		if err := validateTemplateID(runtime.Str("template-id")); err != nil {
+			return err
+		}
 		if err := validateComposeHasAtLeastOneRecipient(runtime.Str("to"), runtime.Str("cc"), runtime.Str("bcc")); err != nil {
 			return err
 		}
@@ -98,6 +105,34 @@ var MailSend = common.Shortcut{
 		}
 
 		mailboxID := resolveComposeMailboxID(runtime)
+
+		// --template-id merge: fetch template and apply it to compose state.
+		var templateLargeAttachmentIDs []string
+		if tid := runtime.Str("template-id"); tid != "" {
+			tpl, err := fetchTemplate(runtime, mailboxID, tid)
+			if err != nil {
+				return err
+			}
+			merged := applyTemplate(
+				templateShortcutSend, tpl,
+				"", "", "", /* no pre-existing draft addrs for +send */
+				false, "", "",
+				to, ccFlag, bccFlag, subject, body,
+			)
+			to = merged.To
+			ccFlag = merged.Cc
+			bccFlag = merged.Bcc
+			subject = merged.Subject
+			body = merged.Body
+			if !runtime.Bool("plain-text") && merged.IsPlainTextMode {
+				plainText = true
+			}
+			templateLargeAttachmentIDs = merged.LargeAttachmentIDs
+			for _, w := range merged.Warnings {
+				fmt.Fprintf(runtime.IO().ErrOut, "warning: %s\n", w)
+			}
+		}
+
 		sigResult, err := resolveSignature(ctx, runtime, mailboxID, signatureID, senderEmail)
 		if err != nil {
 			return err
@@ -170,6 +205,13 @@ var MailSend = common.Shortcut{
 		bld, err = processLargeAttachments(ctx, runtime, bld, composedHTMLBody, composedTextBody, splitByComma(attachFlag), emlBase, 0)
 		if err != nil {
 			return err
+		}
+
+		// Inject any template-provided LARGE attachment file_keys as an
+		// extra X-Lms-Large-Attachment-Ids header so the server references
+		// them when rendering the draft.
+		if hdr, hdrErr := encodeTemplateLargeAttachmentHeader(templateLargeAttachmentIDs); hdrErr == nil && hdr != "" {
+			bld = bld.Header(draftpkg.LargeAttachmentIDsHeader, hdr)
 		}
 
 		rawEML, err := bld.BuildBase64URL()

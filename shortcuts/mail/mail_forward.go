@@ -40,6 +40,8 @@ var MailForward = common.Shortcut{
 		{Name: "confirm-send", Type: "bool", Desc: "Send the forward immediately instead of saving as draft. Only use after the user has explicitly confirmed recipients and content."},
 		{Name: "send-time", Desc: "Scheduled send time as a Unix timestamp in seconds. Must be at least 5 minutes in the future. Use with --confirm-send to schedule the email."},
 		{Name: "request-receipt", Type: "bool", Desc: "Request a read receipt (Message Disposition Notification, RFC 3798) addressed to the sender. Recipient mail clients may prompt the user, send automatically, or silently ignore — delivery of a receipt is not guaranteed."},
+		{Name: "subject", Desc: "Optional. Override the auto-generated Fw: subject. When set, the shortcut uses this value verbatim instead of prefixing the original subject."},
+		{Name: "template-id", Desc: "Optional. Apply a saved template by ID (decimal integer string) before composing. The template's body/to/cc/bcc/attachments are merged into the forward draft (template values appended to user flags / forward-derived values; no de-duplication)."},
 		signatureFlag,
 		priorityFlag},
 	DryRun: func(ctx context.Context, runtime *common.RuntimeContext) *common.DryRunAPI {
@@ -51,9 +53,12 @@ var MailForward = common.Shortcut{
 		if confirmSend {
 			desc = "Forward (--confirm-send): fetch original message → resolve sender address → create draft → send draft"
 		}
-		api := common.NewDryRunAPI().
-			Desc(desc).
-			GET(mailboxPath(mailboxID, "messages", messageId)).
+		api := common.NewDryRunAPI().Desc(desc)
+		if tid := runtime.Str("template-id"); tid != "" {
+			api = api.GET(templateMailboxPath(mailboxID, tid)).
+				Desc("Fetch template to merge with forward compose flags.")
+		}
+		api = api.GET(mailboxPath(mailboxID, "messages", messageId)).
 			GET(mailboxPath(mailboxID, "profile")).
 			POST(mailboxPath(mailboxID, "drafts")).
 			Body(map[string]interface{}{"raw": "<base64url-EML>", "_to": to})
@@ -63,6 +68,9 @@ var MailForward = common.Shortcut{
 		return api
 	},
 	Validate: func(ctx context.Context, runtime *common.RuntimeContext) error {
+		if err := validateTemplateID(runtime.Str("template-id")); err != nil {
+			return err
+		}
 		if err := validateConfirmSendScope(runtime); err != nil {
 			return err
 		}
@@ -128,12 +136,43 @@ var MailForward = common.Shortcut{
 			senderEmail = orig.headTo
 		}
 
+		// --template-id merge (§5.5 Q1-Q5).
+		var templateLargeAttachmentIDs []string
+		if tid := runtime.Str("template-id"); tid != "" {
+			tpl, tErr := fetchTemplate(runtime, mailboxID, tid)
+			if tErr != nil {
+				return tErr
+			}
+			merged := applyTemplate(
+				templateShortcutForward, tpl,
+				to, ccFlag, bccFlag,
+				false, buildForwardSubject(orig.subject), body,
+				"", "", "", runtime.Str("subject"), "",
+			)
+			to = merged.To
+			ccFlag = merged.Cc
+			bccFlag = merged.Bcc
+			body = merged.Body
+			if !plainText && merged.IsPlainTextMode {
+				plainText = true
+			}
+			templateLargeAttachmentIDs = merged.LargeAttachmentIDs
+			for _, w := range merged.Warnings {
+				fmt.Fprintf(runtime.IO().ErrOut, "warning: %s\n", w)
+			}
+		}
+		subjectOverride := strings.TrimSpace(runtime.Str("subject"))
+
 		if err := validateRecipientCount(to, ccFlag, bccFlag); err != nil {
 			return err
 		}
 
+		subjectLine := buildForwardSubject(orig.subject)
+		if subjectOverride != "" {
+			subjectLine = subjectOverride
+		}
 		bld := emlbuilder.New().WithFileIO(runtime.FileIO()).
-			Subject(buildForwardSubject(orig.subject)).
+			Subject(subjectLine).
 			ToAddrs(parseNetAddrs(to))
 		if senderEmail != "" {
 			bld = bld.From("", senderEmail)
@@ -345,6 +384,9 @@ var MailForward = common.Shortcut{
 				return fmt.Errorf("failed to encode large attachment IDs: %w", err)
 			}
 			bld = bld.Header(draftpkg.LargeAttachmentIDsHeader, base64.StdEncoding.EncodeToString(idsJSON))
+		}
+		if hdr, hdrErr := encodeTemplateLargeAttachmentHeader(templateLargeAttachmentIDs); hdrErr == nil && hdr != "" {
+			bld = bld.Header(draftpkg.LargeAttachmentIDsHeader, hdr)
 		}
 		rawEML, err := bld.BuildBase64URL()
 		if err != nil {
