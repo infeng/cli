@@ -146,7 +146,7 @@ var MailForward = common.Shortcut{
 			merged := applyTemplate(
 				templateShortcutForward, tpl,
 				to, ccFlag, bccFlag,
-				false, buildForwardSubject(orig.subject), body,
+				buildForwardSubject(orig.subject), body,
 				"", "", "", runtime.Str("subject"), "",
 			)
 			to = merged.To
@@ -160,6 +160,18 @@ var MailForward = common.Shortcut{
 			for _, w := range merged.Warnings {
 				fmt.Fprintf(runtime.IO().ErrOut, "warning: %s\n", w)
 			}
+			inlineCount, largeCount := countAttachmentsByType(tpl.Attachments)
+			logTemplateInfo(runtime, "apply.forward", map[string]interface{}{
+				"mailbox_id":         mailboxID,
+				"template_id":        tid,
+				"is_plain_text_mode": plainText,
+				"attachments_total":  len(tpl.Attachments),
+				"inline_count":       inlineCount,
+				"large_count":        largeCount,
+				"tos_count":          countAddresses(to),
+				"ccs_count":          countAddresses(ccFlag),
+				"bccs_count":         countAddresses(bccFlag),
+			})
 		}
 		subjectOverride := strings.TrimSpace(runtime.Str("subject"))
 

@@ -8,7 +8,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"net/http"
 	"net/url"
 	"path/filepath"
 	"regexp"
@@ -16,7 +15,6 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
-	larkcore "github.com/larksuite/oapi-sdk-go/v3/core"
 
 	"github.com/larksuite/cli/internal/output"
 	"github.com/larksuite/cli/shortcuts/common"
@@ -36,6 +34,62 @@ const (
 	attachmentTypeSMALL = "SMALL"
 	attachmentTypeLARGE = "LARGE"
 )
+
+// logTemplateInfo emits a structured "info" line to stderr for template
+// shortcuts, matching the existing "tip: ... " / "warning: ... " style used
+// elsewhere in this package. Callers pass key=value pairs; sensitive fields
+// (template_content / subject / recipient plaintext / file_key plaintext)
+// must NOT be passed — only counts, flags, and opaque ids.
+func logTemplateInfo(runtime *common.RuntimeContext, phase string, fields map[string]interface{}) {
+	if runtime == nil {
+		return
+	}
+	out := runtime.IO().ErrOut
+	if out == nil {
+		return
+	}
+	keys := make([]string, 0, len(fields))
+	for k := range fields {
+		keys = append(keys, k)
+	}
+	// Stable key order so log lines are diff-friendly.
+	sortStrings(keys)
+	var parts []string
+	for _, k := range keys {
+		parts = append(parts, fmt.Sprintf("%s=%v", k, fields[k]))
+	}
+	fmt.Fprintf(out, "info: template %s: %s\n", phase, strings.Join(parts, " "))
+}
+
+func sortStrings(s []string) {
+	// tiny insertion sort to avoid importing sort in hot template path.
+	for i := 1; i < len(s); i++ {
+		for j := i; j > 0 && s[j-1] > s[j]; j-- {
+			s[j-1], s[j] = s[j], s[j-1]
+		}
+	}
+}
+
+// countAddresses returns the recipient count implied by a comma-separated
+// address list. Used for key log fields (tos_count/ccs_count/bccs_count).
+func countAddresses(raw string) int {
+	return len(ParseMailboxList(raw))
+}
+
+// countAttachmentsByType returns (inline, large) counts from a template
+// attachment slice. Small non-inline entries are derivable as
+// len(atts)-inline-large.
+func countAttachmentsByType(atts []templateAttachment) (inlineCount, largeCount int) {
+	for _, a := range atts {
+		if a.IsInline {
+			inlineCount++
+		}
+		if a.AttachmentType == attachmentTypeLARGE {
+			largeCount++
+		}
+	}
+	return
+}
 
 // templateEMLBaseOverhead is the estimated byte cost of template headers and
 // address/subject/content envelope when projecting the EML size for LARGE
@@ -84,9 +138,10 @@ type templatePayload struct {
 	CreateTime       string               `json:"create_time,omitempty"`
 }
 
-// templateMailAddr matches v1_data_type.MailAddress ({address, name}).
+// templateMailAddr matches v1_data_type.MailAddress; on the wire only
+// mail_address and (optional) name are emitted. No alias fallback is performed.
 type templateMailAddr struct {
-	Address string `json:"address"`
+	Address string `json:"mail_address"`
 	Name    string `json:"name,omitempty"`
 }
 
@@ -417,14 +472,13 @@ func updateTemplate(runtime *common.RuntimeContext, mailboxID, templateID string
 // applyTemplate. Callers consume individual fields and feed them into the
 // existing +send / +reply / +forward pipelines.
 type templateApplyResult struct {
-	To               string
-	Cc               string
-	Bcc              string
-	Subject          string
-	Body             string
-	IsPlainTextMode  bool
-	IsSendSeparately bool
-	Warnings         []string
+	To              string
+	Cc              string
+	Bcc             string
+	Subject         string
+	Body            string
+	IsPlainTextMode bool
+	Warnings        []string
 	// Attachments carry Drive file_key identifiers; CLI passes them through
 	// to the send/draft path via the X-Lms-Large-Attachment-Ids header for
 	// LARGE items. SMALL items are downloaded server-side when the draft
@@ -444,8 +498,7 @@ const (
 )
 
 // applyTemplate merges a fetched template with draft-derived and user-flag
-// values following the desktop behavior described in tech-design.md §5.5
-// (Q1–Q5). draftTo/Cc/Bcc are the addresses already on the draft (from the
+// values. draftTo/Cc/Bcc are the addresses already on the draft (from the
 // original message for reply/reply-all/forward, or the user flags for send/
 // draft-create). userTo/Cc/Bcc/Subject/Body are user-supplied flag values
 // (empty string = not provided).
@@ -453,16 +506,11 @@ func applyTemplate(
 	kind templateShortcutKind,
 	tpl *templatePayload,
 	draftTo, draftCc, draftBcc string,
-	draftIsSendSeparately bool,
 	draftSubject string,
 	draftBody string,
 	userTo, userCc, userBcc, userSubject, userBody string,
 ) templateApplyResult {
 	res := templateApplyResult{}
-
-	// Q1: matrix injection by (draft sep, template sep).
-	tplSep := tpl.IsSendSeparately
-	draftSep := draftIsSendSeparately
 
 	// Start with whatever is already in the draft (or the user-explicit
 	// draft-to values for send/draft-create).
@@ -470,7 +518,7 @@ func applyTemplate(
 	effCc := draftCc
 	effBcc := draftBcc
 	// User-flag --to/--cc/--bcc values override draft-derived values
-	// before the template injection matrix (§5.5 Q1).
+	// before template injection.
 	if userTo != "" {
 		effTo = userTo
 	}
@@ -485,35 +533,10 @@ func applyTemplate(
 	tplCc := joinTemplateAddresses(tpl.Ccs)
 	tplBcc := joinTemplateAddresses(tpl.Bccs)
 
-	switch {
-	case !draftSep && !tplSep:
-		// (normal, normal): append template to/cc/bcc into draft to/cc/bcc.
-		effTo = appendAddrList(effTo, tplTo)
-		effCc = appendAddrList(effCc, tplCc)
-		effBcc = appendAddrList(effBcc, tplBcc)
-	case !draftSep && tplSep:
-		// (normal, separately): template bcc → draft to.
-		effTo = appendAddrList(effTo, tplBcc)
-	case draftSep && !tplSep:
-		// (separately, normal): template to+cc+bcc merged → draft bcc.
-		merged := tplTo
-		if tplCc != "" {
-			if merged != "" {
-				merged += ", "
-			}
-			merged += tplCc
-		}
-		if tplBcc != "" {
-			if merged != "" {
-				merged += ", "
-			}
-			merged += tplBcc
-		}
-		effBcc = appendAddrList(effBcc, merged)
-	case draftSep && tplSep:
-		// (separately, separately): template bcc → draft bcc.
-		effBcc = appendAddrList(effBcc, tplBcc)
-	}
+	// Append template to/cc/bcc into draft to/cc/bcc.
+	effTo = appendAddrList(effTo, tplTo)
+	effCc = appendAddrList(effCc, tplCc)
+	effBcc = appendAddrList(effBcc, tplBcc)
 
 	res.To = effTo
 	res.Cc = effCc
@@ -535,10 +558,8 @@ func applyTemplate(
 	// the caller can feed back into its compose pipeline.
 	res.Body = mergeTemplateBody(kind, tpl, draftBody, userBody)
 
-	// IsPlainTextMode / IsSendSeparately propagation: user flag not modeled
-	// here (not part of --template-id flag set). Template value wins.
+	// IsPlainTextMode propagation: template value wins.
 	res.IsPlainTextMode = tpl.IsPlainTextMode
-	res.IsSendSeparately = tpl.IsSendSeparately
 
 	// Q4: warn when reply / reply-all + template has to/cc/bcc (likely
 	// duplicates against the reply-derived recipients).
@@ -635,67 +656,6 @@ func mergeTemplateBody(kind templateShortcutKind, tpl *templatePayload, draftBod
 		return tplContent + draftBody
 	}
 	return draftBody
-}
-
-// templateSendSeparatelyHeader is the HTTP header name that signals
-// per-recipient "separate send" behavior to mail.open.access. Appended by
-// +send / +reply / +reply-all / +forward when the merged template marks
-// IsSendSeparately=true. See tech-design.md §4.7.
-const templateSendSeparatelyHeader = "X-Lms-Template-Send-Separately"
-
-// sendDraftWithTemplateHeader sends an existing draft, injecting the
-// X-Lms-Template-Send-Separately: 1 header when separately==true so
-// mail.open.access flips BodyExtra.IsSendSeparately before the data-access
-// relay. Falls back to the regular CallAPI path when separately==false so
-// we preserve existing retry/error handling for the common case.
-func sendDraftWithTemplateHeader(
-	ctx context.Context,
-	runtime *common.RuntimeContext,
-	mailboxID, draftID, sendTime string,
-	separately bool,
-) (map[string]interface{}, error) {
-	if !separately {
-		var body map[string]interface{}
-		if sendTime != "" {
-			body = map[string]interface{}{"send_time": sendTime}
-		}
-		return runtime.CallAPI("POST", templateSendPathForDraft(mailboxID, draftID), nil, body)
-	}
-	body := map[string]interface{}{}
-	if sendTime != "" {
-		body["send_time"] = sendTime
-	}
-	hdrs := http.Header{}
-	hdrs.Set(templateSendSeparatelyHeader, "1")
-	apiReq := &larkcore.ApiReq{
-		HttpMethod: "POST",
-		ApiPath:    templateSendPathForDraft(mailboxID, draftID),
-		Body:       body,
-	}
-	resp, err := runtime.DoAPI(apiReq, larkcore.WithHeaders(hdrs))
-	if err != nil {
-		return nil, err
-	}
-	if resp.StatusCode >= 400 {
-		return nil, fmt.Errorf("send draft failed: HTTP %d", resp.StatusCode)
-	}
-	var env struct {
-		Code int                    `json:"code"`
-		Msg  string                 `json:"msg"`
-		Data map[string]interface{} `json:"data"`
-	}
-	if err := json.Unmarshal(resp.RawBody, &env); err != nil {
-		return nil, fmt.Errorf("send draft: unmarshal response: %w", err)
-	}
-	if env.Code != 0 {
-		return nil, fmt.Errorf("send draft: [%d] %s", env.Code, env.Msg)
-	}
-	return env.Data, nil
-}
-
-func templateSendPathForDraft(mailboxID, draftID string) string {
-	return "/open-apis/mail/v1/user_mailboxes/" + url.PathEscape(mailboxID) +
-		"/drafts/" + url.PathEscape(draftID) + "/send"
 }
 
 // encodeTemplateLargeAttachmentHeader returns the base64-JSON-encoded value

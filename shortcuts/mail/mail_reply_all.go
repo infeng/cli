@@ -160,7 +160,7 @@ var MailReplyAll = common.Shortcut{
 			merged := applyTemplate(
 				templateShortcutReplyAll, tpl,
 				toList, ccList, bccFlag,
-				false, buildReplySubject(orig.subject), body,
+				buildReplySubject(orig.subject), body,
 				"", "", "", runtime.Str("subject"), "",
 			)
 			toList = merged.To
@@ -174,6 +174,18 @@ var MailReplyAll = common.Shortcut{
 			for _, w := range merged.Warnings {
 				fmt.Fprintf(runtime.IO().ErrOut, "warning: %s\n", w)
 			}
+			inlineCount, largeCount := countAttachmentsByType(tpl.Attachments)
+			logTemplateInfo(runtime, "apply.reply_all", map[string]interface{}{
+				"mailbox_id":         mailboxID,
+				"template_id":        tid,
+				"is_plain_text_mode": plainText,
+				"attachments_total":  len(tpl.Attachments),
+				"inline_count":       inlineCount,
+				"large_count":        largeCount,
+				"tos_count":          countAddresses(toList),
+				"ccs_count":          countAddresses(ccList),
+				"bccs_count":         countAddresses(bccFlag),
+			})
 		}
 		subjectOverride := strings.TrimSpace(runtime.Str("subject"))
 

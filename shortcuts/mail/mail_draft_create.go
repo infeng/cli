@@ -120,7 +120,7 @@ var MailDraftCreate = common.Shortcut{
 			}
 			merged := applyTemplate(
 				templateShortcutDraftCreate, tpl,
-				"", "", "", false, "", "",
+				"", "", "", "", "",
 				input.To, input.CC, input.BCC, input.Subject, input.Body,
 			)
 			input.To = merged.To
@@ -135,6 +135,18 @@ var MailDraftCreate = common.Shortcut{
 			for _, w := range merged.Warnings {
 				fmt.Fprintf(runtime.IO().ErrOut, "warning: %s\n", w)
 			}
+			inlineCount, largeCount := countAttachmentsByType(tpl.Attachments)
+			logTemplateInfo(runtime, "apply.draft_create", map[string]interface{}{
+				"mailbox_id":         mailboxID,
+				"template_id":        tid,
+				"is_plain_text_mode": input.PlainText,
+				"attachments_total":  len(tpl.Attachments),
+				"inline_count":       inlineCount,
+				"large_count":        largeCount,
+				"tos_count":          countAddresses(input.To),
+				"ccs_count":          countAddresses(input.CC),
+				"bccs_count":         countAddresses(input.BCC),
+			})
 		}
 		if strings.TrimSpace(input.Subject) == "" {
 			return output.ErrValidation("effective subject is empty after applying template; pass --subject explicitly")

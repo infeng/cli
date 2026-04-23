@@ -70,6 +70,17 @@ var MailTemplateUpdate = common.Shortcut{
 				"template": "<merged from GET + patch flags>",
 				"_warning": "No optimistic locking — last write wins.",
 			})
+		logTemplateInfo(runtime, "update.dry_run", map[string]interface{}{
+			"mailbox_id":         mailboxID,
+			"template_id":        tid,
+			"is_plain_text_mode": runtime.Bool("set-plain-text"),
+			"name_len":           len([]rune(runtime.Str("set-name"))),
+			"attachments_total":  len(splitByComma(runtime.Str("attach"))) + len(parseLocalImgs(content)),
+			"inline_count":       len(parseLocalImgs(content)),
+			"tos_count":          countAddresses(runtime.Str("set-to")),
+			"ccs_count":          countAddresses(runtime.Str("set-cc")),
+			"bccs_count":         countAddresses(runtime.Str("set-bcc")),
+		})
 		return api
 	},
 	Validate: func(ctx context.Context, runtime *common.RuntimeContext) error {
@@ -197,6 +208,20 @@ var MailTemplateUpdate = common.Shortcut{
 			}
 		}
 
+		inlineCount, largeCount := countAttachmentsByType(tpl.Attachments)
+		logTemplateInfo(runtime, "update.execute", map[string]interface{}{
+			"mailbox_id":         mailboxID,
+			"template_id":        tid,
+			"is_plain_text_mode": tpl.IsPlainTextMode,
+			"name_len":           len([]rune(tpl.Name)),
+			"attachments_total":  len(tpl.Attachments),
+			"inline_count":       inlineCount,
+			"large_count":        largeCount,
+			"tos_count":          len(tpl.Tos),
+			"ccs_count":          len(tpl.Ccs),
+			"bccs_count":         len(tpl.Bccs),
+		})
+
 		resp, err := updateTemplate(runtime, mailboxID, tid, tpl)
 		if err != nil {
 			return fmt.Errorf("update template failed: %w", err)
@@ -296,8 +321,8 @@ func buildTemplatePatchSkeleton() map[string]interface{} {
 		"template_content":   "string (HTML or plain text; local <img src> paths are auto-uploaded)",
 		"is_plain_text_mode": "bool (optional)",
 		"is_send_separately": "bool (optional)",
-		"tos":                []map[string]string{{"address": "string", "name": "string(optional)"}},
-		"ccs":                []map[string]string{{"address": "string", "name": "string(optional)"}},
-		"bccs":               []map[string]string{{"address": "string", "name": "string(optional)"}},
+		"tos":                []map[string]string{{"mail_address": "string", "name": "string(optional)"}},
+		"ccs":                []map[string]string{{"mail_address": "string", "name": "string(optional)"}},
+		"bccs":               []map[string]string{{"mail_address": "string", "name": "string(optional)"}},
 	}
 }

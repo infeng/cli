@@ -109,7 +109,7 @@ lark-cli mail +template-update --as user --template-id 712345 \
 | Q4 附件 | 所有 5 个 Shortcut | 过期 / 封禁超大附件丢弃；`emlProjectedSize` 累计 > 25MB 则模板小附件改标 LARGE；去重键 = `Attachment.id`（Drive file_key）；顺序 = 草稿在前、模板在后 |
 | Q5 cid 冲突 | inline 图片 | cid 由 UUID v4 生成（碰撞概率 ~ 2^-122），不显式检测 |
 
-**IsSendSeparately**：若合并后为 `true`，CLI 在 `drafts.send` 请求上追加 HTTP 头 `X-Lms-Template-Send-Separately: 1`；`mail.open.access` 端识别此 header 后把 PB `BodyExtra.IsSendSeparately=true`，真正拆送在 `mail.smtp_out.mail_out`。
+**IsSendSeparately**：该字段仅作为模板自身属性持久化（`+template-create --is-send-separately` / `+template-update --set-is-send-separately`），`--template-id` 合并时 CLI **不再**把它传递到 `drafts.send` 请求上。若需要按收件人分别发送，请显式使用 `+send --send-separately` 等 Shortcut 的预置开关。
 
 **Warning**：`+reply` / `+reply-all` + 模板且模板有 to/cc/bcc 时，Execute 时 CLI 在 stderr 输出提示：
 

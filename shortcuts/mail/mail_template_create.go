@@ -28,7 +28,7 @@ var MailTemplateCreate = common.Shortcut{
 		{Name: "template-content", Desc: "Template body content. Prefer HTML. Referenced local images (<img src=\"./file.png\">) are auto-uploaded to Drive and rewritten to cid: refs."},
 		{Name: "template-content-file", Desc: "Optional. Path to a file whose contents become --template-content. Relative path only. Mutually exclusive with --template-content."},
 		{Name: "plain-text", Type: "bool", Desc: "Mark the template as plain-text mode (is_plain_text_mode=true). Inline images still require HTML content; use only for pure plain-text templates."},
-		{Name: "is-send-separately", Type: "bool", Desc: "Mark the template as per-recipient separate-send (is_send_separately=true). Callers that apply this template will forward the state to the send endpoint via the X-Lms-Template-Send-Separately header."},
+		{Name: "is-send-separately", Type: "bool", Desc: "Mark the template as per-recipient separate-send (is_send_separately=true). Persisted on the template record only; the CLI does not forward this state when applying the template via --template-id."},
 		{Name: "to", Desc: "Optional. Default To recipient list. Separate multiple addresses with commas. Display-name format is supported."},
 		{Name: "cc", Desc: "Optional. Default Cc recipient list. Separate multiple addresses with commas."},
 		{Name: "bcc", Desc: "Optional. Default Bcc recipient list. Separate multiple addresses with commas."},
@@ -37,6 +37,16 @@ var MailTemplateCreate = common.Shortcut{
 	DryRun: func(ctx context.Context, runtime *common.RuntimeContext) *common.DryRunAPI {
 		mailboxID := resolveComposeMailboxID(runtime)
 		content, _, _ := resolveTemplateContent(runtime)
+		logTemplateInfo(runtime, "create.dry_run", map[string]interface{}{
+			"mailbox_id":         mailboxID,
+			"is_plain_text_mode": runtime.Bool("plain-text"),
+			"name_len":           len([]rune(runtime.Str("name"))),
+			"attachments_total":  len(splitByComma(runtime.Str("attach"))) + len(parseLocalImgs(content)),
+			"inline_count":       len(parseLocalImgs(content)),
+			"tos_count":          countAddresses(runtime.Str("to")),
+			"ccs_count":          countAddresses(runtime.Str("cc")),
+			"bccs_count":         countAddresses(runtime.Str("bcc")),
+		})
 		api := common.NewDryRunAPI().
 			Desc("Create a new mail template. The command scans HTML for local <img src> references, uploads each inline image to Drive (≤20MB single upload_all; >20MB upload_prepare+upload_part+upload_finish), rewrites <img src> values to cid: references, uploads any non-inline --attach files the same way, and finally POSTs a Template payload to mail.user_mailbox.templates.create.")
 		// Surface the Drive upload steps explicitly so AI callers see the
@@ -96,6 +106,18 @@ var MailTemplateCreate = common.Shortcut{
 		if err != nil {
 			return err
 		}
+		inlineCount, largeCount := countAttachmentsByType(atts)
+		logTemplateInfo(runtime, "create.execute", map[string]interface{}{
+			"mailbox_id":         mailboxID,
+			"is_plain_text_mode": isPlainText,
+			"name_len":           len([]rune(name)),
+			"attachments_total":  len(atts),
+			"inline_count":       inlineCount,
+			"large_count":        largeCount,
+			"tos_count":          len(tos),
+			"ccs_count":          len(ccs),
+			"bccs_count":         len(bccs),
+		})
 
 		payload := &templatePayload{
 			Name:             name,

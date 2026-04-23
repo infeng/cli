@@ -116,7 +116,7 @@ var MailSend = common.Shortcut{
 			merged := applyTemplate(
 				templateShortcutSend, tpl,
 				"", "", "", /* no pre-existing draft addrs for +send */
-				false, "", "",
+				"", "",
 				to, ccFlag, bccFlag, subject, body,
 			)
 			to = merged.To
@@ -131,6 +131,18 @@ var MailSend = common.Shortcut{
 			for _, w := range merged.Warnings {
 				fmt.Fprintf(runtime.IO().ErrOut, "warning: %s\n", w)
 			}
+			inlineCount, largeCount := countAttachmentsByType(tpl.Attachments)
+			logTemplateInfo(runtime, "apply.send", map[string]interface{}{
+				"mailbox_id":         mailboxID,
+				"template_id":        tid,
+				"is_plain_text_mode": plainText,
+				"attachments_total":  len(tpl.Attachments),
+				"inline_count":       inlineCount,
+				"large_count":        largeCount,
+				"tos_count":          countAddresses(to),
+				"ccs_count":          countAddresses(ccFlag),
+				"bccs_count":         countAddresses(bccFlag),
+			})
 		}
 
 		sigResult, err := resolveSignature(ctx, runtime, mailboxID, signatureID, senderEmail)

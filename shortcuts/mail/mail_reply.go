@@ -146,7 +146,7 @@ var MailReply = common.Shortcut{
 			merged := applyTemplate(
 				templateShortcutReply, tpl,
 				replyTo, ccFlag, bccFlag,
-				false, buildReplySubject(orig.subject), body,
+				buildReplySubject(orig.subject), body,
 				"", "", "", runtime.Str("subject"), "",
 			)
 			replyTo = merged.To
@@ -163,6 +163,18 @@ var MailReply = common.Shortcut{
 			if s := strings.TrimSpace(merged.Subject); s != "" && s != buildReplySubject(orig.subject) {
 				orig.subject = s
 			}
+			inlineCount, largeCount := countAttachmentsByType(tpl.Attachments)
+			logTemplateInfo(runtime, "apply.reply", map[string]interface{}{
+				"mailbox_id":         mailboxID,
+				"template_id":        tid,
+				"is_plain_text_mode": plainText,
+				"attachments_total":  len(tpl.Attachments),
+				"inline_count":       inlineCount,
+				"large_count":        largeCount,
+				"tos_count":          countAddresses(replyTo),
+				"ccs_count":          countAddresses(ccFlag),
+				"bccs_count":         countAddresses(bccFlag),
+			})
 		}
 		// --subject (explicit override) takes precedence over auto-generated.
 		subjectOverride := strings.TrimSpace(runtime.Str("subject"))
