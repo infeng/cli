@@ -125,17 +125,16 @@ type templateAttachment struct {
 // Field names match the spec's snake_case and the note that to/cc/bcc use
 // the plural "tos/ccs/bccs" forms.
 type templatePayload struct {
-	TemplateID       string               `json:"template_id,omitempty"`
-	Name             string               `json:"name"`
-	Subject          string               `json:"subject,omitempty"`
-	TemplateContent  string               `json:"template_content,omitempty"`
-	IsPlainTextMode  bool                 `json:"is_plain_text_mode"`
-	IsSendSeparately bool                 `json:"is_send_separately"`
-	Tos              []templateMailAddr   `json:"tos,omitempty"`
-	Ccs              []templateMailAddr   `json:"ccs,omitempty"`
-	Bccs             []templateMailAddr   `json:"bccs,omitempty"`
-	Attachments      []templateAttachment `json:"attachments,omitempty"`
-	CreateTime       string               `json:"create_time,omitempty"`
+	TemplateID      string               `json:"template_id,omitempty"`
+	Name            string               `json:"name"`
+	Subject         string               `json:"subject,omitempty"`
+	TemplateContent string               `json:"template_content,omitempty"`
+	IsPlainTextMode bool                 `json:"is_plain_text_mode"`
+	Tos             []templateMailAddr   `json:"tos,omitempty"`
+	Ccs             []templateMailAddr   `json:"ccs,omitempty"`
+	Bccs            []templateMailAddr   `json:"bccs,omitempty"`
+	Attachments     []templateAttachment `json:"attachments,omitempty"`
+	CreateTime      string               `json:"create_time,omitempty"`
 }
 
 // templateMailAddr matches v1_data_type.MailAddress; on the wire only

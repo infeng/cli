@@ -33,7 +33,6 @@ var MailTemplateUpdate = common.Shortcut{
 		{Name: "set-template-content", Desc: "Replace the template body content. Prefer HTML for rich formatting."},
 		{Name: "set-template-content-file", Desc: "Replace template body content with the contents of a file (relative path only). Mutually exclusive with --set-template-content."},
 		{Name: "set-plain-text", Type: "bool", Desc: "Set is_plain_text_mode=true."},
-		{Name: "set-is-send-separately", Type: "bool", Desc: "Set is_send_separately=true."},
 		{Name: "set-to", Desc: "Replace the To recipient list. Separate multiple addresses with commas."},
 		{Name: "set-cc", Desc: "Replace the Cc recipient list."},
 		{Name: "set-bcc", Desc: "Replace the Bcc recipient list."},
@@ -125,7 +124,6 @@ var MailTemplateUpdate = common.Shortcut{
 						fmt.Fprintf(w, "subject: %s\n", tpl.Subject)
 					}
 					fmt.Fprintf(w, "is_plain_text_mode: %v\n", tpl.IsPlainTextMode)
-					fmt.Fprintf(w, "is_send_separately: %v\n", tpl.IsSendSeparately)
 					fmt.Fprintf(w, "attachments: %d\n", len(tpl.Attachments))
 				}
 			})
@@ -148,9 +146,6 @@ var MailTemplateUpdate = common.Shortcut{
 		}
 		if runtime.Bool("set-plain-text") {
 			tpl.IsPlainTextMode = true
-		}
-		if runtime.Bool("set-is-send-separately") {
-			tpl.IsSendSeparately = true
 		}
 		if v := runtime.Str("set-to"); v != "" {
 			tpl.Tos = renderTemplateAddresses(v)
@@ -272,14 +267,13 @@ func resolveTemplateUpdateContent(runtime *common.RuntimeContext) (content, sour
 // --patch-file JSON. Any field set to a non-nil value overrides the fetched
 // template's corresponding field.
 type templatePatchFile struct {
-	Name             *string             `json:"name,omitempty"`
-	Subject          *string             `json:"subject,omitempty"`
-	TemplateContent  *string             `json:"template_content,omitempty"`
-	IsPlainTextMode  *bool               `json:"is_plain_text_mode,omitempty"`
-	IsSendSeparately *bool               `json:"is_send_separately,omitempty"`
-	Tos              *[]templateMailAddr `json:"tos,omitempty"`
-	Ccs              *[]templateMailAddr `json:"ccs,omitempty"`
-	Bccs             *[]templateMailAddr `json:"bccs,omitempty"`
+	Name            *string             `json:"name,omitempty"`
+	Subject         *string             `json:"subject,omitempty"`
+	TemplateContent *string             `json:"template_content,omitempty"`
+	IsPlainTextMode *bool               `json:"is_plain_text_mode,omitempty"`
+	Tos             *[]templateMailAddr `json:"tos,omitempty"`
+	Ccs             *[]templateMailAddr `json:"ccs,omitempty"`
+	Bccs            *[]templateMailAddr `json:"bccs,omitempty"`
 }
 
 func applyTemplatePatchFile(tpl *templatePayload, patch *templatePatchFile) {
@@ -297,9 +291,6 @@ func applyTemplatePatchFile(tpl *templatePayload, patch *templatePatchFile) {
 	}
 	if patch.IsPlainTextMode != nil {
 		tpl.IsPlainTextMode = *patch.IsPlainTextMode
-	}
-	if patch.IsSendSeparately != nil {
-		tpl.IsSendSeparately = *patch.IsSendSeparately
 	}
 	if patch.Tos != nil {
 		tpl.Tos = *patch.Tos
@@ -320,7 +311,6 @@ func buildTemplatePatchSkeleton() map[string]interface{} {
 		"subject":            "string (optional)",
 		"template_content":   "string (HTML or plain text; local <img src> paths are auto-uploaded)",
 		"is_plain_text_mode": "bool (optional)",
-		"is_send_separately": "bool (optional)",
 		"tos":                []map[string]string{{"mail_address": "string", "name": "string(optional)"}},
 		"ccs":                []map[string]string{{"mail_address": "string", "name": "string(optional)"}},
 		"bccs":               []map[string]string{{"mail_address": "string", "name": "string(optional)"}},

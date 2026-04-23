@@ -25,7 +25,6 @@
 - `--subject`（可选，模板默认主题）
 - `--template-content` / `--template-content-file`（二选一，正文内容；HTML 首选）
 - `--plain-text`（标为纯文本模式）
-- `--is-send-separately`（标为按收件人分别发送）
 - `--to` / `--cc` / `--bcc`（逗号分隔，支持 `Name <email>` 格式）
 - `--attach`（逗号分隔，非 inline 附件路径）
 
@@ -66,7 +65,7 @@ lark-cli mail +template-create --as user \
 
 **扁平 flag**：
 - `--set-name` / `--set-subject` / `--set-template-content` / `--set-template-content-file`
-- `--set-plain-text` / `--set-is-send-separately`（布尔置 true；不提供也不会置 false）
+- `--set-plain-text`（布尔置 true；不提供也不会置 false）
 - `--set-to` / `--set-cc` / `--set-bcc`
 - `--attach <path,path>`（追加非 inline 附件，书写顺序敏感）
 
@@ -109,7 +108,7 @@ lark-cli mail +template-update --as user --template-id 712345 \
 | Q4 附件 | 所有 5 个 Shortcut | 过期 / 封禁超大附件丢弃；`emlProjectedSize` 累计 > 25MB 则模板小附件改标 LARGE；去重键 = `Attachment.id`（Drive file_key）；顺序 = 草稿在前、模板在后 |
 | Q5 cid 冲突 | inline 图片 | cid 由 UUID v4 生成（碰撞概率 ~ 2^-122），不显式检测 |
 
-**IsSendSeparately**：该字段仅作为模板自身属性持久化（`+template-create --is-send-separately` / `+template-update --set-is-send-separately`），`--template-id` 合并时 CLI **不再**把它传递到 `drafts.send` 请求上。若需要按收件人分别发送，请显式使用 `+send --send-separately` 等 Shortcut 的预置开关。
+**IsSendSeparately**：模板不承载该字段；`+template-create` / `+template-update` / `--template-id` 合并 / `drafts.send` 均不涉及此字段。若需要按收件人分别发送，请显式使用 `+send --send-separately` 等 Shortcut 的预置开关。
 
 **Warning**：`+reply` / `+reply-all` + 模板且模板有 to/cc/bcc 时，Execute 时 CLI 在 stderr 输出提示：
 

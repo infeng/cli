@@ -28,7 +28,6 @@ var MailTemplateCreate = common.Shortcut{
 		{Name: "template-content", Desc: "Template body content. Prefer HTML. Referenced local images (<img src=\"./file.png\">) are auto-uploaded to Drive and rewritten to cid: refs."},
 		{Name: "template-content-file", Desc: "Optional. Path to a file whose contents become --template-content. Relative path only. Mutually exclusive with --template-content."},
 		{Name: "plain-text", Type: "bool", Desc: "Mark the template as plain-text mode (is_plain_text_mode=true). Inline images still require HTML content; use only for pure plain-text templates."},
-		{Name: "is-send-separately", Type: "bool", Desc: "Mark the template as per-recipient separate-send (is_send_separately=true). Persisted on the template record only; the CLI does not forward this state when applying the template via --template-id."},
 		{Name: "to", Desc: "Optional. Default To recipient list. Separate multiple addresses with commas. Display-name format is supported."},
 		{Name: "cc", Desc: "Optional. Default Cc recipient list. Separate multiple addresses with commas."},
 		{Name: "bcc", Desc: "Optional. Default Bcc recipient list. Separate multiple addresses with commas."},
@@ -64,7 +63,6 @@ var MailTemplateCreate = common.Shortcut{
 					"subject":            runtime.Str("subject"),
 					"template_content":   "<rewritten-HTML-or-text>",
 					"is_plain_text_mode": runtime.Bool("plain-text"),
-					"is_send_separately": runtime.Bool("is-send-separately"),
 					"tos":                renderTemplateAddresses(runtime.Str("to")),
 					"ccs":                renderTemplateAddresses(runtime.Str("cc")),
 					"bccs":               renderTemplateAddresses(runtime.Str("bcc")),
@@ -94,7 +92,6 @@ var MailTemplateCreate = common.Shortcut{
 		name := runtime.Str("name")
 		subject := runtime.Str("subject")
 		isPlainText := runtime.Bool("plain-text")
-		isSendSeparately := runtime.Bool("is-send-separately")
 		tos := renderTemplateAddresses(runtime.Str("to"))
 		ccs := renderTemplateAddresses(runtime.Str("cc"))
 		bccs := renderTemplateAddresses(runtime.Str("bcc"))
@@ -120,15 +117,14 @@ var MailTemplateCreate = common.Shortcut{
 		})
 
 		payload := &templatePayload{
-			Name:             name,
-			Subject:          subject,
-			TemplateContent:  rewritten,
-			IsPlainTextMode:  isPlainText,
-			IsSendSeparately: isSendSeparately,
-			Tos:              tos,
-			Ccs:              ccs,
-			Bccs:             bccs,
-			Attachments:      atts,
+			Name:            name,
+			Subject:         subject,
+			TemplateContent: rewritten,
+			IsPlainTextMode: isPlainText,
+			Tos:             tos,
+			Ccs:             ccs,
+			Bccs:            bccs,
+			Attachments:     atts,
 		}
 
 		resp, err := createTemplate(runtime, mailboxID, payload)
