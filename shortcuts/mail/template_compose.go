@@ -27,13 +27,14 @@ import (
 // in hot paths and mirrors the draft package's header handling.
 var stdBase64Enc = base64.StdEncoding
 
-// Template attachment_type values, matching v1_data_type.Attachment.attachment_type:
-//   - SMALL: embedded in the EML at send time (base64, counted against the 25 MB limit).
-//   - LARGE: uploaded separately; download URL rendered by the server.
-const (
-	attachmentTypeSMALL = "SMALL"
-	attachmentTypeLARGE = "LARGE"
-)
+// Template attachment_type values, matching v1_data_type.Attachment.attachment_type
+// (an IDL i32 enum):
+//   - 1 (attachmentTypeSmall): embedded in the EML at send time (base64,
+//     counted against the 25 MB limit).
+//   - 2 (attachmentTypeLarge): uploaded separately; download URL rendered by
+//     the server.
+//
+// Constants are declared in helpers.go and reused here.
 
 // logTemplateInfo emits a structured "info" line to stderr for template
 // shortcuts, matching the existing "tip: ... " / "warning: ... " style used
@@ -84,7 +85,7 @@ func countAttachmentsByType(atts []templateAttachment) (inlineCount, largeCount 
 		if a.IsInline {
 			inlineCount++
 		}
-		if a.AttachmentType == attachmentTypeLARGE {
+		if a.AttachmentType == attachmentTypeLarge {
 			largeCount++
 		}
 	}
@@ -117,7 +118,7 @@ type templateAttachment struct {
 	Filename       string `json:"filename,omitempty"`
 	CID            string `json:"cid,omitempty"` // only for is_inline=true
 	IsInline       bool   `json:"is_inline"`
-	AttachmentType string `json:"attachment_type,omitempty"` // "SMALL" | "LARGE"
+	AttachmentType int    `json:"attachment_type,omitempty"` // i32 enum: 1=SMALL, 2=LARGE
 	Body           string `json:"body"`                      // required: Drive file_key (same as ID) for uploaded content
 }
 
@@ -324,9 +325,9 @@ func newTemplateAttachmentBuilder(name, subject, content string, tos, ccs, bccs 
 // attachment is LARGE regardless of size.
 func (b *templateAttachmentBuilder) append(fileKey, filename, cid string, isInline bool, fileSize int64) {
 	base64Size := estimateBase64EMLSize(fileSize)
-	aType := attachmentTypeSMALL
+	aType := attachmentTypeSmall
 	if b.largeBucket || b.projectedSize+base64Size >= templateLargeSwitchThreshold {
-		aType = attachmentTypeLARGE
+		aType = attachmentTypeLarge
 		b.largeBucket = true
 	} else {
 		b.projectedSize += base64Size
