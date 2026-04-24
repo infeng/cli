@@ -111,15 +111,18 @@ const templateLargeSwitchThreshold int64 = 25 * 1024 * 1024
 //	  Matches backend validateTemplateContentSize (open-access/biz/mailtemplate/
 //	  template_service.go:1064).
 //	maxTemplateBodyInlineSmallBytes: raw-byte ceiling on template_content +
-//	  inline image bytes + SMALL non-inline attachment bytes, 50 MB. LARGE
-//	  attachments live on Drive as separate references and are excluded.
-//	  When a non-inline attachment would push the running total over this
-//	  cap, the builder flips it to LARGE so the rest of the template still
-//	  fits; if inline bytes alone already overflow (LARGE is not an option
-//	  for inline images — see append()), the builder surfaces an error.
+//	  inline image bytes + SMALL non-inline attachment bytes, 25 MB — aligned
+//	  with the draft/send EML SMALL-attachment limit so a template that just
+//	  barely fits can be applied to a draft without any entry being promoted
+//	  at send time. LARGE attachments live on Drive as separate references
+//	  and are excluded. When a non-inline attachment would push the running
+//	  total over this cap, the builder flips it to LARGE so the rest of the
+//	  template still fits; if inline bytes alone already overflow (LARGE is
+//	  not an option for inline images — see append()), the builder surfaces
+//	  an error.
 const (
 	maxTemplateContentBytes         int64 = 3 * 1024 * 1024
-	maxTemplateBodyInlineSmallBytes int64 = 50 * 1024 * 1024
+	maxTemplateBodyInlineSmallBytes int64 = 25 * 1024 * 1024
 )
 
 // templateAttachment is the OAPI Attachment payload used in the templates
@@ -321,7 +324,7 @@ func uploadToDriveForTemplate(ctx context.Context, runtime *common.RuntimeContex
 // Two independent size ledgers run in parallel:
 //   - projectedSize (base64 EML projection) drives the 25 MB send-time
 //     LARGE switch (templateLargeSwitchThreshold).
-//   - rawBodyInlineSmall (body + inline + SMALL raw bytes) drives the 50 MB
+//   - rawBodyInlineSmall (body + inline + SMALL raw bytes) drives the 25 MB
 //     template-level cap (maxTemplateBodyInlineSmallBytes). LARGE attachments
 //     are excluded because they live on Drive and are fetched by URL, not
 //     embedded.
@@ -353,7 +356,7 @@ func newTemplateAttachmentBuilder(name, subject, content string, tos, ccs, bccs 
 }
 
 // append adds one attachment, picking SMALL or LARGE for non-inline entries
-// based on the projected EML size running total and the 50 MB body+inline+
+// based on the projected EML size running total and the 25 MB body+inline+
 // SMALL cap. Once largeBucket flips to true, every subsequent non-inline
 // attachment is LARGE regardless of size. Inline images are always SMALL:
 // they are referenced from the HTML body via cid:<id> and therefore must be
@@ -366,7 +369,7 @@ func (b *templateAttachmentBuilder) append(fileKey, filename, cid string, isInli
 		// Inline images cannot be LARGE; still fold their base64 footprint
 		// into projectedSize so any subsequent non-inline attachment sees
 		// the correct cumulative EML size and flips to LARGE when needed.
-		// Raw bytes also count toward the 50 MB body+inline+SMALL cap; if
+		// Raw bytes also count toward the 25 MB body+inline+SMALL cap; if
 		// inline alone overflows, finalize() will surface an error because
 		// we cannot bump inline to LARGE.
 		b.projectedSize += base64Size
@@ -398,7 +401,7 @@ func (b *templateAttachmentBuilder) append(fileKey, filename, cid string, isInli
 }
 
 // finalize runs after all attachments have been appended, validating the
-// 50 MB template-level ceiling on body+inline+SMALL raw bytes. The cap only
+// 25 MB template-level ceiling on body+inline+SMALL raw bytes. The cap only
 // fires when inline images alone overflow it; non-inline overflow is
 // self-healing via the LARGE switch inside append().
 func (b *templateAttachmentBuilder) finalize() error {
