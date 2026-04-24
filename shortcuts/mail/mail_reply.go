@@ -138,7 +138,9 @@ var MailReply = common.Shortcut{
 
 		// --template-id merge (§5.5 Q1-Q5).
 		var templateLargeAttachmentIDs []string
-		if tid := runtime.Str("template-id"); tid != "" {
+		var templateInlineAttachments []templateInlineRef
+		templateID := runtime.Str("template-id")
+		if tid := templateID; tid != "" {
 			tpl, tErr := fetchTemplate(runtime, mailboxID, tid)
 			if tErr != nil {
 				return tErr
@@ -157,6 +159,7 @@ var MailReply = common.Shortcut{
 				plainText = true
 			}
 			templateLargeAttachmentIDs = merged.LargeAttachmentIDs
+			templateInlineAttachments = merged.InlineAttachments
 			for _, w := range merged.Warnings {
 				fmt.Fprintf(runtime.IO().ErrOut, "warning: %s\n", w)
 			}
@@ -256,6 +259,12 @@ var MailReply = common.Shortcut{
 				bld = bld.AddFileInline(spec.FilePath, spec.CID)
 				userCIDs = append(userCIDs, spec.CID)
 			}
+			var tplInlineCIDs []string
+			bld, tplInlineCIDs, err = embedTemplateInlineAttachments(ctx, runtime, bld, bodyWithSig, mailboxID, templateID, templateInlineAttachments)
+			if err != nil {
+				return err
+			}
+			userCIDs = append(userCIDs, tplInlineCIDs...)
 			if err := validateInlineCIDs(bodyWithSig, append(userCIDs, signatureCIDs(sigResult)...), srcCIDs); err != nil {
 				return err
 			}

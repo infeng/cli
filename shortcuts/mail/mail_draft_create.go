@@ -113,7 +113,9 @@ var MailDraftCreate = common.Shortcut{
 			PlainText: runtime.Bool("plain-text"),
 		}
 		var templateLargeAttachmentIDs []string
-		if tid := runtime.Str("template-id"); tid != "" {
+		var templateInlineAttachments []templateInlineRef
+		templateID := runtime.Str("template-id")
+		if tid := templateID; tid != "" {
 			tpl, err := fetchTemplate(runtime, mailboxID, tid)
 			if err != nil {
 				return err
@@ -132,6 +134,7 @@ var MailDraftCreate = common.Shortcut{
 				input.PlainText = true
 			}
 			templateLargeAttachmentIDs = merged.LargeAttachmentIDs
+			templateInlineAttachments = merged.InlineAttachments
 			for _, w := range merged.Warnings {
 				fmt.Fprintf(runtime.IO().ErrOut, "warning: %s\n", w)
 			}
@@ -158,7 +161,8 @@ var MailDraftCreate = common.Shortcut{
 		if err != nil {
 			return err
 		}
-		rawEML, err := buildRawEMLForDraftCreate(ctx, runtime, input, sigResult, priority, templateLargeAttachmentIDs)
+		rawEML, err := buildRawEMLForDraftCreate(ctx, runtime, input, sigResult, priority,
+			templateLargeAttachmentIDs, mailboxID, templateID, templateInlineAttachments)
 		if err != nil {
 			return err
 		}
@@ -192,7 +196,16 @@ var MailDraftCreate = common.Shortcut{
 // senderEmail returns an error early. The returned string is ready to POST
 // to the drafts endpoint. ctx is plumbed through for large-attachment
 // processing.
-func buildRawEMLForDraftCreate(ctx context.Context, runtime *common.RuntimeContext, input draftCreateInput, sigResult *signatureResult, priority string, templateLargeAttachmentIDs []string) (string, error) {
+func buildRawEMLForDraftCreate(
+	ctx context.Context,
+	runtime *common.RuntimeContext,
+	input draftCreateInput,
+	sigResult *signatureResult,
+	priority string,
+	templateLargeAttachmentIDs []string,
+	mailboxID, templateID string,
+	templateInlineAttachments []templateInlineRef,
+) (string, error) {
 	senderEmail := resolveComposeSenderEmail(runtime)
 	if senderEmail == "" {
 		return "", fmt.Errorf("unable to determine sender email; please specify --from explicitly")
@@ -262,6 +275,12 @@ func buildRawEMLForDraftCreate(ctx context.Context, runtime *common.RuntimeConte
 			allCIDs = append(allCIDs, spec.CID)
 		}
 		allCIDs = append(allCIDs, signatureCIDs(sigResult)...)
+		var tplInlineCIDs []string
+		bld, tplInlineCIDs, err = embedTemplateInlineAttachments(ctx, runtime, bld, resolved, mailboxID, templateID, templateInlineAttachments)
+		if err != nil {
+			return "", err
+		}
+		allCIDs = append(allCIDs, tplInlineCIDs...)
 		if err := validateInlineCIDs(resolved, allCIDs, nil); err != nil {
 			return "", err
 		}

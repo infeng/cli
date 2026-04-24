@@ -116,7 +116,9 @@ var MailSend = common.Shortcut{
 
 		// --template-id merge: fetch template and apply it to compose state.
 		var templateLargeAttachmentIDs []string
-		if tid := runtime.Str("template-id"); tid != "" {
+		var templateInlineAttachments []templateInlineRef
+		templateID := runtime.Str("template-id")
+		if tid := templateID; tid != "" {
 			tpl, err := fetchTemplate(runtime, mailboxID, tid)
 			if err != nil {
 				return err
@@ -136,6 +138,7 @@ var MailSend = common.Shortcut{
 				plainText = true
 			}
 			templateLargeAttachmentIDs = merged.LargeAttachmentIDs
+			templateInlineAttachments = merged.InlineAttachments
 			for _, w := range merged.Warnings {
 				fmt.Fprintf(runtime.IO().ErrOut, "warning: %s\n", w)
 			}
@@ -211,6 +214,12 @@ var MailSend = common.Shortcut{
 				allCIDs = append(allCIDs, spec.CID)
 			}
 			allCIDs = append(allCIDs, signatureCIDs(sigResult)...)
+			var tplInlineCIDs []string
+			bld, tplInlineCIDs, err = embedTemplateInlineAttachments(ctx, runtime, bld, resolved, mailboxID, templateID, templateInlineAttachments)
+			if err != nil {
+				return err
+			}
+			allCIDs = append(allCIDs, tplInlineCIDs...)
 			if err := validateInlineCIDs(resolved, allCIDs, nil); err != nil {
 				return err
 			}

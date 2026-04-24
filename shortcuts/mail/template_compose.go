@@ -8,6 +8,8 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"net/url"
 	"path/filepath"
 	"regexp"
@@ -19,6 +21,7 @@ import (
 	"github.com/larksuite/cli/internal/output"
 	"github.com/larksuite/cli/shortcuts/common"
 	draftpkg "github.com/larksuite/cli/shortcuts/mail/draft"
+	"github.com/larksuite/cli/shortcuts/mail/emlbuilder"
 	"github.com/larksuite/cli/shortcuts/mail/filecheck"
 )
 
@@ -555,6 +558,16 @@ func updateTemplate(runtime *common.RuntimeContext, mailboxID, templateID string
 
 // ── --template-id merge logic (§5.5) ─────────────────────────────────
 
+// templateInlineRef describes one inline image carried by an applied
+// template. Callers download the bytes from Drive (via FileKey) and
+// register the CID with the EML builder's inline parts so the HTML body's
+// <img src="cid:..."> references resolve against a real MIME part.
+type templateInlineRef struct {
+	FileKey  string
+	Filename string
+	CID      string
+}
+
 // templateApplyResult holds the merged compose state produced by
 // applyTemplate. Callers consume individual fields and feed them into the
 // existing +send / +reply / +forward pipelines.
@@ -571,6 +584,12 @@ type templateApplyResult struct {
 	// LARGE items. SMALL items are downloaded server-side when the draft
 	// materializes; we rely on server-side "reuse by file_key" semantics.
 	LargeAttachmentIDs []string
+	// InlineAttachments carries template inline images (IsInline=true, SMALL
+	// type) whose <img src="cid:..."> references appear in Body. The CLI
+	// must fetch each file_key from Drive and register it via
+	// emlbuilder.AddInline so the draft compose pipeline's inline CID
+	// validation passes and the sent mail renders the image.
+	InlineAttachments []templateInlineRef
 }
 
 // templateShortcutKind enumerates the 5 shortcuts that accept --template-id.
@@ -666,6 +685,30 @@ func applyTemplate(
 			continue
 		}
 		res.LargeAttachmentIDs = append(res.LargeAttachmentIDs, att.ID)
+		if att.IsInline {
+			if att.CID == "" {
+				// Inline with no CID can't be referenced from the HTML body —
+				// warn instead of silently dropping so the user notices the
+				// template data anomaly.
+				res.Warnings = append(res.Warnings,
+					fmt.Sprintf("template inline attachment %q has no cid; skipping (HTML body cannot reference it)", att.Filename))
+				continue
+			}
+			if att.AttachmentType == attachmentTypeLarge {
+				// Historical / third-party data might have LARGE inline
+				// entries; CLI can't embed those because the bytes are
+				// served via Drive URL, not inline. Skip with a warning
+				// rather than block compose.
+				res.Warnings = append(res.Warnings,
+					fmt.Sprintf("template inline attachment %q is marked LARGE; skipping (inline images must be SMALL to embed in the EML)", att.Filename))
+				continue
+			}
+			res.InlineAttachments = append(res.InlineAttachments, templateInlineRef{
+				FileKey:  att.ID,
+				Filename: att.Filename,
+				CID:      att.CID,
+			})
+		}
 	}
 
 	return res
@@ -776,3 +819,163 @@ func encodeTemplateLargeAttachmentHeader(tplIDs []string) (string, error) {
 
 // b64StdEncode avoids importing encoding/base64 twice.
 func b64StdEncode(buf []byte) string { return stdBase64Enc.EncodeToString(buf) }
+
+// fetchTemplateAttachmentURLs resolves time-limited download URLs for a
+// batch of template attachment IDs via the
+// user_mailbox.template.attachments.download_url API. Returns a map from
+// attachment_id to signed download URL. Failed IDs surface as warnings in
+// the returned list so the caller can decide whether to abort.
+//
+// The endpoint accepts up to N attachment_ids per call; we batch at 20 to
+// stay well under the query-string limit.
+func fetchTemplateAttachmentURLs(
+	runtime *common.RuntimeContext,
+	mailboxID, templateID string,
+	attachmentIDs []string,
+) (map[string]string, []warningEntry, error) {
+	if len(attachmentIDs) == 0 {
+		return nil, nil, nil
+	}
+	urlMap := make(map[string]string, len(attachmentIDs))
+	warnings := make([]warningEntry, 0)
+	const batchSize = 20
+	for i := 0; i < len(attachmentIDs); i += batchSize {
+		end := i + batchSize
+		if end > len(attachmentIDs) {
+			end = len(attachmentIDs)
+		}
+		batch := attachmentIDs[i:end]
+
+		parts := make([]string, len(batch))
+		for j, id := range batch {
+			parts[j] = "attachment_ids=" + url.QueryEscape(id)
+		}
+		apiURL := templateMailboxPath(mailboxID, templateID) + "/attachments/download_url?" + strings.Join(parts, "&")
+
+		data, err := runtime.CallAPI("GET", apiURL, nil, nil)
+		if err != nil {
+			return nil, warnings, fmt.Errorf("template attachments/download_url (template_id=%s): %w", templateID, err)
+		}
+		if urls, ok := data["download_urls"].([]interface{}); ok {
+			for _, item := range urls {
+				m, ok := item.(map[string]interface{})
+				if !ok {
+					continue
+				}
+				attID := strVal(m["attachment_id"])
+				dlURL := strVal(m["download_url"])
+				if attID != "" && dlURL != "" {
+					urlMap[attID] = dlURL
+				}
+			}
+		}
+		// The template variant of the endpoint surfaces failures under
+		// "failed_reasons" (see registry meta mail.json:5614-5632). Record
+		// each as a warning so callers can log and skip.
+		if failed, ok := data["failed_reasons"].([]interface{}); ok {
+			for _, item := range failed {
+				m, ok := item.(map[string]interface{})
+				if !ok {
+					continue
+				}
+				warnings = append(warnings, warningEntry{
+					Code:         "template_attachment_download_url_failed",
+					Level:        "warning",
+					AttachmentID: strVal(m["attachment_id"]),
+					Detail:       strVal(m["reason"]),
+					Retryable:    false,
+				})
+			}
+		}
+	}
+	return urlMap, warnings, nil
+}
+
+// downloadPresignedURL fetches the body of a pre-signed URL returned by
+// the attachments/download_url API. The URL already carries an authcode,
+// so a plain HTTP GET (no CLI auth) is sufficient.
+func downloadPresignedURL(ctx context.Context, dlURL string) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, dlURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		// Drain a short body slice to enrich the error.
+		preview, _ := io.ReadAll(io.LimitReader(resp.Body, 256))
+		return nil, fmt.Errorf("presigned download status %d: %s", resp.StatusCode, strings.TrimSpace(string(preview)))
+	}
+	return io.ReadAll(resp.Body)
+}
+
+// embedTemplateInlineAttachments batch-resolves the template inline image
+// download URLs via user_mailbox.template.attachments.download_url, fetches
+// each pre-signed URL's bytes, and registers them with the EML builder as
+// CID-referenced inline parts. Returns the augmented builder plus the list
+// of CIDs registered so the caller can extend its allCIDs set before
+// validateInlineCIDs. Entries whose CID is not referenced in the HTML body
+// (e.g. body was edited without pruning the attachment list) are silently
+// skipped to avoid unreferenced-MIME-part bloat.
+func embedTemplateInlineAttachments(
+	ctx context.Context,
+	runtime *common.RuntimeContext,
+	bld emlbuilder.Builder,
+	htmlBody string,
+	mailboxID, templateID string,
+	refs []templateInlineRef,
+) (emlbuilder.Builder, []string, error) {
+	if len(refs) == 0 || templateID == "" {
+		return bld, nil, nil
+	}
+	// Filter to refs actually referenced in the HTML body.
+	wanted := make([]templateInlineRef, 0, len(refs))
+	for _, ref := range refs {
+		if ref.CID == "" || ref.FileKey == "" {
+			continue
+		}
+		if !strings.Contains(htmlBody, "cid:"+ref.CID) {
+			continue
+		}
+		wanted = append(wanted, ref)
+	}
+	if len(wanted) == 0 {
+		return bld, nil, nil
+	}
+	ids := make([]string, 0, len(wanted))
+	for _, ref := range wanted {
+		ids = append(ids, ref.FileKey)
+	}
+	urlMap, warns, err := fetchTemplateAttachmentURLs(runtime, mailboxID, templateID, ids)
+	if err != nil {
+		return bld, nil, err
+	}
+	for _, w := range warns {
+		fmt.Fprintf(runtime.IO().ErrOut, "warning: code=%s attachment_id=%s detail=%s\n", w.Code, w.AttachmentID, w.Detail)
+	}
+	registered := make([]string, 0, len(wanted))
+	for _, ref := range wanted {
+		dlURL, ok := urlMap[ref.FileKey]
+		if !ok || dlURL == "" {
+			return bld, nil, fmt.Errorf("template inline image %q (cid=%s): download URL not returned by server", ref.Filename, ref.CID)
+		}
+		bytes, err := downloadPresignedURL(ctx, dlURL)
+		if err != nil {
+			return bld, nil, fmt.Errorf("template inline image %q (cid=%s): %w", ref.Filename, ref.CID, err)
+		}
+		filename := ref.Filename
+		if filename == "" {
+			filename = ref.CID
+		}
+		contentType, err := filecheck.CheckInlineImageFormat(filename, bytes)
+		if err != nil {
+			return bld, nil, fmt.Errorf("template inline image %q (cid=%s): %w", filename, ref.CID, err)
+		}
+		bld = bld.AddInline(bytes, contentType, filename, ref.CID)
+		registered = append(registered, ref.CID)
+	}
+	return bld, registered, nil
+}
