@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/larksuite/cli/internal/output"
 	"github.com/larksuite/cli/shortcuts/common"
 	draftpkg "github.com/larksuite/cli/shortcuts/mail/draft"
 	"github.com/larksuite/cli/shortcuts/mail/emlbuilder"
@@ -24,8 +25,8 @@ var MailSend = common.Shortcut{
 	AuthTypes:   []string{"user"},
 	Flags: []common.Flag{
 		{Name: "to", Desc: "Recipient email address(es), comma-separated"},
-		{Name: "subject", Desc: "Required. Email subject", Required: true},
-		{Name: "body", Desc: "Required. Email body. Prefer HTML for rich formatting (bold, lists, links); plain text is also supported. Body type is auto-detected. Use --plain-text to force plain-text mode.", Required: true},
+		{Name: "subject", Desc: "Email subject. Required unless --template-id supplies a non-empty subject."},
+		{Name: "body", Desc: "Email body. Prefer HTML for rich formatting (bold, lists, links); plain text is also supported. Body type is auto-detected. Use --plain-text to force plain-text mode. Required unless --template-id supplies a non-empty body."},
 		{Name: "from", Desc: "Sender email address for the From header. When using an alias (send_as) address, set this to the alias and use --mailbox for the owning mailbox. Defaults to the mailbox's primary address."},
 		{Name: "mailbox", Desc: "Mailbox email address that owns the draft (default: falls back to --from, then me). Use this when the sender (--from) differs from the mailbox, e.g. sending via an alias or send_as address."},
 		{Name: "cc", Desc: "CC email address(es), comma-separated"},
@@ -70,6 +71,13 @@ var MailSend = common.Shortcut{
 	Validate: func(ctx context.Context, runtime *common.RuntimeContext) error {
 		if err := validateTemplateID(runtime.Str("template-id")); err != nil {
 			return err
+		}
+		hasTemplate := runtime.Str("template-id") != ""
+		if !hasTemplate && strings.TrimSpace(runtime.Str("subject")) == "" {
+			return output.ErrValidation("--subject is required; pass the final email subject (or use --template-id)")
+		}
+		if !hasTemplate && strings.TrimSpace(runtime.Str("body")) == "" {
+			return output.ErrValidation("--body is required; pass the full email body (or use --template-id)")
 		}
 		if err := validateComposeHasAtLeastOneRecipient(runtime.Str("to"), runtime.Str("cc"), runtime.Str("bcc")); err != nil {
 			return err
