@@ -8,8 +8,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
 	"net/url"
 	"path/filepath"
 	"regexp"
@@ -921,27 +919,6 @@ func fetchTemplateAttachmentURLs(
 	return urlMap, warnings, nil
 }
 
-// downloadPresignedURL fetches the body of a pre-signed URL returned by
-// the attachments/download_url API. The URL already carries an authcode,
-// so a plain HTTP GET (no CLI auth) is sufficient.
-func downloadPresignedURL(ctx context.Context, dlURL string) ([]byte, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, dlURL, nil)
-	if err != nil {
-		return nil, err
-	}
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		// Drain a short body slice to enrich the error.
-		preview, _ := io.ReadAll(io.LimitReader(resp.Body, 256))
-		return nil, fmt.Errorf("presigned download status %d: %s", resp.StatusCode, strings.TrimSpace(string(preview)))
-	}
-	return io.ReadAll(resp.Body)
-}
-
 // embedTemplateInlineAttachments batch-resolves the template inline image
 // download URLs via user_mailbox.template.attachments.download_url, fetches
 // each pre-signed URL's bytes, and registers them with the EML builder as
@@ -992,7 +969,7 @@ func embedTemplateInlineAttachments(
 		if !ok || dlURL == "" {
 			return bld, nil, fmt.Errorf("template inline image %q (cid=%s): download URL not returned by server", ref.Filename, ref.CID)
 		}
-		bytes, err := downloadPresignedURL(ctx, dlURL)
+		bytes, err := downloadAttachmentContent(runtime, dlURL)
 		if err != nil {
 			return bld, nil, fmt.Errorf("template inline image %q (cid=%s): %w", ref.Filename, ref.CID, err)
 		}
@@ -1053,7 +1030,7 @@ func embedTemplateSmallAttachments(
 		if !ok || dlURL == "" {
 			return bld, 0, fmt.Errorf("template attachment %q: download URL not returned by server", ref.Filename)
 		}
-		buf, err := downloadPresignedURL(ctx, dlURL)
+		buf, err := downloadAttachmentContent(runtime, dlURL)
 		if err != nil {
 			return bld, 0, fmt.Errorf("template attachment %q: %w", ref.Filename, err)
 		}
