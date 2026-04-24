@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/larksuite/cli/internal/output"
 	"github.com/larksuite/cli/shortcuts/common"
 	draftpkg "github.com/larksuite/cli/shortcuts/mail/draft"
 	"github.com/larksuite/cli/shortcuts/mail/emlbuilder"
@@ -25,7 +26,7 @@ var MailReply = common.Shortcut{
 	AuthTypes:   []string{"user"},
 	Flags: []common.Flag{
 		{Name: "message-id", Desc: "Required. Message ID to reply to", Required: true},
-		{Name: "body", Desc: "Required. Reply body. Prefer HTML for rich formatting; plain text is also supported. Body type is auto-detected from the reply body and the original message. Use --plain-text to force plain-text mode.", Required: true},
+		{Name: "body", Desc: "Reply body. Prefer HTML for rich formatting; plain text is also supported. Body type is auto-detected from the reply body and the original message. Use --plain-text to force plain-text mode. Required unless --template-id supplies a non-empty body."},
 		{Name: "from", Desc: "Sender email address for the From header. When using an alias (send_as) address, set this to the alias and use --mailbox for the owning mailbox. Defaults to the mailbox's primary address."},
 		{Name: "mailbox", Desc: "Mailbox email address that owns the draft (default: falls back to --from, then me). Use this when the sender (--from) differs from the mailbox, e.g. sending via an alias or send_as address."},
 		{Name: "to", Desc: "Additional To address(es), comma-separated (appended to original sender's address)"},
@@ -66,6 +67,10 @@ var MailReply = common.Shortcut{
 	Validate: func(ctx context.Context, runtime *common.RuntimeContext) error {
 		if err := validateTemplateID(runtime.Str("template-id")); err != nil {
 			return err
+		}
+		hasTemplate := runtime.Str("template-id") != ""
+		if !hasTemplate && strings.TrimSpace(runtime.Str("body")) == "" {
+			return output.ErrValidation("--body is required; pass the reply body (or use --template-id)")
 		}
 		if err := validateConfirmSendScope(runtime); err != nil {
 			return err
