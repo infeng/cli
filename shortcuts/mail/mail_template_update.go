@@ -210,7 +210,22 @@ var MailTemplateUpdate = common.Shortcut{
 		// Merge: keep existing template attachments (already uploaded, have
 		// file_keys), append newly uploaded ones. The EML-size/LARGE switch
 		// applies independently per call because this is a full-replace PUT.
-		tpl.Attachments = append(tpl.Attachments, newAtts...)
+		//
+		// Dedup by (ID, CID) so repeated `+template-update --attach foo.png`
+		// runs don't accumulate duplicate rows (same Drive file_key /
+		// same inline cid); the first occurrence wins.
+		seenAttKey := make(map[string]bool, len(tpl.Attachments))
+		attKey := func(a templateAttachment) string { return a.ID + "|" + a.CID }
+		for _, a := range tpl.Attachments {
+			seenAttKey[attKey(a)] = true
+		}
+		for _, a := range newAtts {
+			if seenAttKey[attKey(a)] {
+				continue
+			}
+			seenAttKey[attKey(a)] = true
+			tpl.Attachments = append(tpl.Attachments, a)
+		}
 		// Server rejects the PUT with errno 99992402
 		// `template.attachments[*].body is required` when any entry's
 		// `body` field is empty. Fetched entries may round-trip without

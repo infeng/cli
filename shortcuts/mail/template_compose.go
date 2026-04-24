@@ -793,7 +793,9 @@ func mergeTemplateBody(kind templateShortcutKind, tpl *templatePayload, draftBod
 		if strings.TrimSpace(draftBody) == "" {
 			return tplContent
 		}
-		return draftBody + tplContent
+		// Match the plain-text branch's explicit separator so template
+		// markup doesn't butt up against user-authored HTML.
+		return draftBody + "<br><br>" + tplContent
 	case templateShortcutReply, templateShortcutReplyAll, templateShortcutForward:
 		// At this compose layer, draftBody is the user-authored area only
 		// (the caller adds the quote block downstream). Inject template

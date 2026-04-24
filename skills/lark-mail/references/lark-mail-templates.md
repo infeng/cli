@@ -112,7 +112,7 @@ lark-cli mail +template-update --as user --template-id 712345 \
 
 **Warning**：`+reply` / `+reply-all` + 模板且模板有 to/cc/bcc 时，Execute 时 CLI 在 stderr 输出提示：
 
-```
+```text
 warning: template to/cc/bcc are appended without de-duplication; you may see repeated recipients. Use --to/--cc/--bcc to override, or run +template-update to clear template addresses.
 ```
 

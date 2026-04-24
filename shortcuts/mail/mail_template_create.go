@@ -35,7 +35,10 @@ var MailTemplateCreate = common.Shortcut{
 	},
 	DryRun: func(ctx context.Context, runtime *common.RuntimeContext) *common.DryRunAPI {
 		mailboxID := resolveComposeMailboxID(runtime)
-		content, _, _ := resolveTemplateContent(runtime)
+		content, _, rcErr := resolveTemplateContent(runtime)
+		if rcErr != nil {
+			fmt.Fprintf(runtime.IO().ErrOut, "warning: dry-run could not load template content: %v\n", rcErr)
+		}
 		logTemplateInfo(runtime, "create.dry_run", map[string]interface{}{
 			"mailbox_id":         mailboxID,
 			"is_plain_text_mode": runtime.Bool("plain-text"),

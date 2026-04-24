@@ -170,9 +170,10 @@ var MailReply = common.Shortcut{
 			for _, w := range merged.Warnings {
 				fmt.Fprintf(runtime.IO().ErrOut, "warning: %s\n", w)
 			}
-			if s := strings.TrimSpace(merged.Subject); s != "" && s != buildReplySubject(orig.subject) {
-				orig.subject = s
-			}
+			// Reply/reply-all/forward keep the Re:/Fw:-prefixed auto-subject
+			// (or the user's --subject); template subject is deliberately
+			// ignored for these shortcuts so threading with the original
+			// conversation is preserved.
 			inlineCount, largeCount := countAttachmentsByType(tpl.Attachments)
 			logTemplateInfo(runtime, "apply.reply", map[string]interface{}{
 				"mailbox_id":         mailboxID,

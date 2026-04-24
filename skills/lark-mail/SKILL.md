@@ -441,11 +441,6 @@ lark-cli mail <resource> <method> [flags] # 调用 API
   - `modify` — 本接口提供修改邮件会话的能力，支持移动邮件会话的文件夹、给邮件会话添加和移除标签、标记邮件会话读和未读、移动邮件会话至垃圾邮件等能力。不支持移动邮件会话到已删除文件夹，如需，请使用删除邮件会话接口。至少填写add_label_ids、remove_label_ids、add_folder中的一个参数。
   - `trash` — 移动指定的邮件会话到已删除文件夹
 
-### user_mailbox.sent_messages
-
-  - `recall` — 撤回指定邮件。前置条件：邮件须已投递，且发送时间在 24 小时以内；搬家中的域名不支持撤回。返回说明：若用户或邮件不满足撤回条件，接口仍返回 200，响应体中 recall_status 为 unavailable，recall_restriction_reason 标明具体原因。返回成功仅表示撤回请求已受理，实际撤回结果请调用「查询邮件撤回进度」接口获取。
-  - `get_recall_detail` — 查询指定邮件的撤回结果详情，包括整体撤回进度、成功/失败/处理中的收件人数量，以及每个收件人的撤回状态和失败原因。
-
 ### user_mailbox.templates
 
   - `create` — 创建个人邮件模板（优先使用 `+template-create` Shortcut 以自动处理 HTML 内嵌图片与 Drive 附件上传）

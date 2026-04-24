@@ -79,8 +79,13 @@ var MailSend = common.Shortcut{
 		if !hasTemplate && strings.TrimSpace(runtime.Str("body")) == "" {
 			return output.ErrValidation("--body is required; pass the full email body (or use --template-id)")
 		}
-		if err := validateComposeHasAtLeastOneRecipient(runtime.Str("to"), runtime.Str("cc"), runtime.Str("bcc")); err != nil {
-			return err
+		// With --template-id, tos/ccs/bccs may come from the template, so
+		// defer the at-least-one-recipient check to Execute (after
+		// applyTemplate has merged the template addresses in).
+		if !hasTemplate {
+			if err := validateComposeHasAtLeastOneRecipient(runtime.Str("to"), runtime.Str("cc"), runtime.Str("bcc")); err != nil {
+				return err
+			}
 		}
 		if err := validateSendTime(runtime); err != nil {
 			return err
@@ -156,6 +161,12 @@ var MailSend = common.Shortcut{
 				"ccs_count":          countAddresses(ccFlag),
 				"bccs_count":         countAddresses(bccFlag),
 			})
+			// Post-merge recipient check: Validate skipped the pre-apply check
+			// when --template-id was set, so enforce it here once the template
+			// addresses are folded in.
+			if err := validateComposeHasAtLeastOneRecipient(to, ccFlag, bccFlag); err != nil {
+				return err
+			}
 		}
 
 		sigResult, err := resolveSignature(ctx, runtime, mailboxID, signatureID, senderEmail)
