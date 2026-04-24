@@ -139,6 +139,7 @@ var MailReply = common.Shortcut{
 		// --template-id merge (§5.5 Q1-Q5).
 		var templateLargeAttachmentIDs []string
 		var templateInlineAttachments []templateInlineRef
+		var templateSmallAttachments []templateAttachmentRef
 		templateID := runtime.Str("template-id")
 		if tid := templateID; tid != "" {
 			tpl, tErr := fetchTemplate(runtime, mailboxID, tid)
@@ -160,6 +161,7 @@ var MailReply = common.Shortcut{
 			}
 			templateLargeAttachmentIDs = merged.LargeAttachmentIDs
 			templateInlineAttachments = merged.InlineAttachments
+			templateSmallAttachments = merged.SmallAttachments
 			for _, w := range merged.Warnings {
 				fmt.Fprintf(runtime.IO().ErrOut, "warning: %s\n", w)
 			}
@@ -272,10 +274,16 @@ var MailReply = common.Shortcut{
 			composedTextBody = bodyStr + quoted
 			bld = bld.TextBody([]byte(composedTextBody))
 		}
+		// Embed template SMALL non-inline attachments regardless of body mode.
+		var templateSmallBytes int64
+		bld, templateSmallBytes, err = embedTemplateSmallAttachments(ctx, runtime, bld, mailboxID, templateID, templateSmallAttachments)
+		if err != nil {
+			return err
+		}
 		bld = applyPriority(bld, priority)
 		allInlinePaths := append(inlineSpecFilePaths(inlineSpecs), autoResolvedPaths...)
 		composedBodySize := int64(len(composedHTMLBody) + len(composedTextBody))
-		emlBase := estimateEMLBaseSize(runtime.FileIO(), composedBodySize, allInlinePaths, srcInlineBytes)
+		emlBase := estimateEMLBaseSize(runtime.FileIO(), composedBodySize, allInlinePaths, srcInlineBytes) + templateSmallBytes
 		bld, err = processLargeAttachments(ctx, runtime, bld, composedHTMLBody, composedTextBody, splitByComma(attachFlag), emlBase, 0)
 		if err != nil {
 			return err

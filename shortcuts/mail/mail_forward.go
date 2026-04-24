@@ -139,6 +139,7 @@ var MailForward = common.Shortcut{
 		// --template-id merge (§5.5 Q1-Q5).
 		var templateLargeAttachmentIDs []string
 		var templateInlineAttachments []templateInlineRef
+		var templateSmallAttachments []templateAttachmentRef
 		templateID := runtime.Str("template-id")
 		if tid := templateID; tid != "" {
 			tpl, tErr := fetchTemplate(runtime, mailboxID, tid)
@@ -160,6 +161,7 @@ var MailForward = common.Shortcut{
 			}
 			templateLargeAttachmentIDs = merged.LargeAttachmentIDs
 			templateInlineAttachments = merged.InlineAttachments
+			templateSmallAttachments = merged.SmallAttachments
 			for _, w := range merged.Warnings {
 				fmt.Fprintf(runtime.IO().ErrOut, "warning: %s\n", w)
 			}
@@ -273,6 +275,14 @@ var MailForward = common.Shortcut{
 			composedTextBody = buildForwardedMessage(&orig, body)
 			bld = bld.TextBody([]byte(composedTextBody))
 		}
+		// Embed template SMALL non-inline attachments regardless of body mode.
+		// Template LARGE entries keep going through the X-Lms-Large-Attachment-Ids
+		// header below; inline already ran in the HTML branch above.
+		var templateSmallBytes int64
+		bld, templateSmallBytes, err = embedTemplateSmallAttachments(ctx, runtime, bld, mailboxID, templateID, templateSmallAttachments)
+		if err != nil {
+			return err
+		}
 		bld = applyPriority(bld, priority)
 		// Download original attachments, separating normal from large.
 		type downloadedAtt struct {
@@ -312,7 +322,7 @@ var MailForward = common.Shortcut{
 		// attachments instead of being embedded.
 		allInlinePaths := append(inlineSpecFilePaths(inlineSpecs), autoResolvedPaths...)
 		composedBodySize := int64(len(composedHTMLBody) + len(composedTextBody))
-		emlBase := estimateEMLBaseSize(runtime.FileIO(), composedBodySize, allInlinePaths, srcInlineBytes)
+		emlBase := estimateEMLBaseSize(runtime.FileIO(), composedBodySize, allInlinePaths, srcInlineBytes) + templateSmallBytes
 
 		var allFiles []attachmentFile
 		for i, att := range origAtts {

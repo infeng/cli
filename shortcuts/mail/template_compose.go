@@ -568,6 +568,16 @@ type templateInlineRef struct {
 	CID      string
 }
 
+// templateAttachmentRef describes one SMALL non-inline attachment carried
+// by an applied template. These are regular file attachments (not inline
+// images), so they have no CID. Callers fetch the bytes via
+// embedTemplateSmallAttachments and register them on the EML builder as
+// plain MIME attachment parts.
+type templateAttachmentRef struct {
+	FileKey  string
+	Filename string
+}
+
 // templateApplyResult holds the merged compose state produced by
 // applyTemplate. Callers consume individual fields and feed them into the
 // existing +send / +reply / +forward pipelines.
@@ -579,10 +589,12 @@ type templateApplyResult struct {
 	Body            string
 	IsPlainTextMode bool
 	Warnings        []string
-	// Attachments carry Drive file_key identifiers; CLI passes them through
-	// to the send/draft path via the X-Lms-Large-Attachment-Ids header for
-	// LARGE items. SMALL items are downloaded server-side when the draft
-	// materializes; we rely on server-side "reuse by file_key" semantics.
+	// LargeAttachmentIDs carries Drive file_keys for the template's true
+	// LARGE (attachment_type=2) non-inline entries. Callers pass these
+	// through the X-Lms-Large-Attachment-Ids header so the server renders
+	// them as download-link attachments; inline and SMALL entries must
+	// NOT be included (they'd be promoted to LARGE, turning embedded
+	// content into bare download URLs).
 	LargeAttachmentIDs []string
 	// InlineAttachments carries template inline images (IsInline=true, SMALL
 	// type) whose <img src="cid:..."> references appear in Body. The CLI
@@ -590,6 +602,12 @@ type templateApplyResult struct {
 	// emlbuilder.AddInline so the draft compose pipeline's inline CID
 	// validation passes and the sent mail renders the image.
 	InlineAttachments []templateInlineRef
+	// SmallAttachments carries SMALL non-inline template attachments
+	// (IsInline=false, attachment_type=1). The CLI fetches each file_key's
+	// bytes via the template attachments/download_url API and registers
+	// them through emlbuilder.AddAttachment so they end up embedded in the
+	// EML (matching draft-compose behavior for regular attachments).
+	SmallAttachments []templateAttachmentRef
 }
 
 // templateShortcutKind enumerates the 5 shortcuts that accept --template-id.
@@ -677,28 +695,26 @@ func applyTemplate(
 				"or run +template-update to clear template addresses.")
 	}
 
-	// Collect template attachment ids for the caller (file_keys). The SEND
-	// path uses these as the X-Lms-Large-Attachment-Ids header entries for
-	// LARGE types; SMALL entries are reused by file_key server-side.
+	// Classify template attachments by (inline, attachment_type) into the
+	// three output channels. Each classification drives a different draft-
+	// compose wiring:
+	//   inline+SMALL     → embedTemplateInlineAttachments (AddInline, CID-bound)
+	//   non-inline+SMALL → embedTemplateSmallAttachments (AddAttachment)
+	//   non-inline+LARGE → X-Lms-Large-Attachment-Ids header (server renders URL)
+	// Anomalous combinations (inline+LARGE, inline without CID) are dropped
+	// with a warning because they cannot round-trip through any of the three
+	// pipelines.
 	for _, att := range tpl.Attachments {
 		if att.ID == "" {
 			continue
 		}
-		res.LargeAttachmentIDs = append(res.LargeAttachmentIDs, att.ID)
 		if att.IsInline {
 			if att.CID == "" {
-				// Inline with no CID can't be referenced from the HTML body —
-				// warn instead of silently dropping so the user notices the
-				// template data anomaly.
 				res.Warnings = append(res.Warnings,
 					fmt.Sprintf("template inline attachment %q has no cid; skipping (HTML body cannot reference it)", att.Filename))
 				continue
 			}
 			if att.AttachmentType == attachmentTypeLarge {
-				// Historical / third-party data might have LARGE inline
-				// entries; CLI can't embed those because the bytes are
-				// served via Drive URL, not inline. Skip with a warning
-				// rather than block compose.
 				res.Warnings = append(res.Warnings,
 					fmt.Sprintf("template inline attachment %q is marked LARGE; skipping (inline images must be SMALL to embed in the EML)", att.Filename))
 				continue
@@ -707,6 +723,17 @@ func applyTemplate(
 				FileKey:  att.ID,
 				Filename: att.Filename,
 				CID:      att.CID,
+			})
+			continue
+		}
+		// Non-inline: SMALL → embedded as a regular attachment part, LARGE →
+		// download-URL header.
+		if att.AttachmentType == attachmentTypeLarge {
+			res.LargeAttachmentIDs = append(res.LargeAttachmentIDs, att.ID)
+		} else {
+			res.SmallAttachments = append(res.SmallAttachments, templateAttachmentRef{
+				FileKey:  att.ID,
+				Filename: att.Filename,
 			})
 		}
 	}
@@ -978,4 +1005,64 @@ func embedTemplateInlineAttachments(
 		registered = append(registered, ref.CID)
 	}
 	return bld, registered, nil
+}
+
+// embedTemplateSmallAttachments batch-resolves the template SMALL non-inline
+// attachment download URLs via user_mailbox.template.attachments.download_url,
+// fetches each pre-signed URL's bytes, and registers them with the EML
+// builder via AddAttachment (matching the content-type canonicalization
+// that AddFileAttachment uses: application/octet-stream). Returns the
+// augmented builder plus the total raw bytes so the caller can feed
+// them into the EML size budget.
+func embedTemplateSmallAttachments(
+	ctx context.Context,
+	runtime *common.RuntimeContext,
+	bld emlbuilder.Builder,
+	mailboxID, templateID string,
+	refs []templateAttachmentRef,
+) (emlbuilder.Builder, int64, error) {
+	if len(refs) == 0 || templateID == "" {
+		return bld, 0, nil
+	}
+	ids := make([]string, 0, len(refs))
+	for _, ref := range refs {
+		if ref.FileKey == "" {
+			continue
+		}
+		ids = append(ids, ref.FileKey)
+	}
+	if len(ids) == 0 {
+		return bld, 0, nil
+	}
+	urlMap, warns, err := fetchTemplateAttachmentURLs(runtime, mailboxID, templateID, ids)
+	if err != nil {
+		return bld, 0, err
+	}
+	for _, w := range warns {
+		fmt.Fprintf(runtime.IO().ErrOut, "warning: code=%s attachment_id=%s detail=%s\n", w.Code, w.AttachmentID, w.Detail)
+	}
+	var totalBytes int64
+	for _, ref := range refs {
+		if ref.FileKey == "" {
+			continue
+		}
+		dlURL, ok := urlMap[ref.FileKey]
+		if !ok || dlURL == "" {
+			return bld, 0, fmt.Errorf("template attachment %q: download URL not returned by server", ref.Filename)
+		}
+		buf, err := downloadPresignedURL(ctx, dlURL)
+		if err != nil {
+			return bld, 0, fmt.Errorf("template attachment %q: %w", ref.Filename, err)
+		}
+		filename := ref.Filename
+		if filename == "" {
+			filename = ref.FileKey
+		}
+		// Match AddFileAttachment's backend-aligned content-type: regular
+		// attachments are canonicalized to application/octet-stream on
+		// save/readback, so the builder should emit the same.
+		bld = bld.AddAttachment(buf, "application/octet-stream", filename)
+		totalBytes += int64(len(buf))
+	}
+	return bld, totalBytes, nil
 }

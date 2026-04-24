@@ -114,6 +114,7 @@ var MailDraftCreate = common.Shortcut{
 		}
 		var templateLargeAttachmentIDs []string
 		var templateInlineAttachments []templateInlineRef
+		var templateSmallAttachments []templateAttachmentRef
 		templateID := runtime.Str("template-id")
 		if tid := templateID; tid != "" {
 			tpl, err := fetchTemplate(runtime, mailboxID, tid)
@@ -135,6 +136,7 @@ var MailDraftCreate = common.Shortcut{
 			}
 			templateLargeAttachmentIDs = merged.LargeAttachmentIDs
 			templateInlineAttachments = merged.InlineAttachments
+			templateSmallAttachments = merged.SmallAttachments
 			for _, w := range merged.Warnings {
 				fmt.Fprintf(runtime.IO().ErrOut, "warning: %s\n", w)
 			}
@@ -162,7 +164,7 @@ var MailDraftCreate = common.Shortcut{
 			return err
 		}
 		rawEML, err := buildRawEMLForDraftCreate(ctx, runtime, input, sigResult, priority,
-			templateLargeAttachmentIDs, mailboxID, templateID, templateInlineAttachments)
+			templateLargeAttachmentIDs, mailboxID, templateID, templateInlineAttachments, templateSmallAttachments)
 		if err != nil {
 			return err
 		}
@@ -205,6 +207,7 @@ func buildRawEMLForDraftCreate(
 	templateLargeAttachmentIDs []string,
 	mailboxID, templateID string,
 	templateInlineAttachments []templateInlineRef,
+	templateSmallAttachments []templateAttachmentRef,
 ) (string, error) {
 	senderEmail := resolveComposeSenderEmail(runtime)
 	if senderEmail == "" {
@@ -288,10 +291,18 @@ func buildRawEMLForDraftCreate(
 		composedTextBody = input.Body
 		bld = bld.TextBody([]byte(composedTextBody))
 	}
+	// Embed template SMALL non-inline attachments via AddAttachment. No-op
+	// when the template contributes none; runs in both HTML and plain-text
+	// branches because regular attachments are independent of body mode.
+	var templateSmallBytes int64
+	bld, templateSmallBytes, err = embedTemplateSmallAttachments(ctx, runtime, bld, mailboxID, templateID, templateSmallAttachments)
+	if err != nil {
+		return "", err
+	}
 	bld = applyPriority(bld, priority)
 	allInlinePaths := append(inlineSpecFilePaths(inlineSpecs), autoResolvedPaths...)
 	composedBodySize := int64(len(composedHTMLBody) + len(composedTextBody))
-	emlBase := estimateEMLBaseSize(runtime.FileIO(), composedBodySize, allInlinePaths, 0)
+	emlBase := estimateEMLBaseSize(runtime.FileIO(), composedBodySize, allInlinePaths, 0) + templateSmallBytes
 	bld, err = processLargeAttachments(ctx, runtime, bld, composedHTMLBody, composedTextBody, splitByComma(input.Attach), emlBase, 0)
 	if err != nil {
 		return "", err
