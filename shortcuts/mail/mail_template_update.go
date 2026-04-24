@@ -191,6 +191,11 @@ var MailTemplateUpdate = common.Shortcut{
 		if contentChanged {
 			tpl.TemplateContent = wrapTemplateContentIfNeeded(tpl.TemplateContent, tpl.IsPlainTextMode)
 		}
+		if int64(len(tpl.TemplateContent)) > maxTemplateContentBytes {
+			return output.ErrValidation("template content exceeds %d MB (got %.1f MB)",
+				maxTemplateContentBytes/(1024*1024),
+				float64(len(tpl.TemplateContent))/1024/1024)
+		}
 
 		// Re-resolve <img> references against the (possibly updated) content.
 		rewritten, newAtts, err := buildTemplatePayloadFromFlags(

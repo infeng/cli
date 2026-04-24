@@ -102,6 +102,23 @@ const templateEMLBaseOverhead = 2048
 // limit used elsewhere and desktop's SMALL_ATTACHMENT_MAX_SIZE.
 const templateLargeSwitchThreshold int64 = 25 * 1024 * 1024
 
+// Template-level size limits.
+//
+//	maxTemplateContentBytes: template_content (HTML body) hard cap, 3 MB.
+//	  Matches backend validateTemplateContentSize (open-access/biz/mailtemplate/
+//	  template_service.go:1064).
+//	maxTemplateBodyInlineSmallBytes: raw-byte ceiling on template_content +
+//	  inline image bytes + SMALL non-inline attachment bytes, 50 MB. LARGE
+//	  attachments live on Drive as separate references and are excluded.
+//	  When a non-inline attachment would push the running total over this
+//	  cap, the builder flips it to LARGE so the rest of the template still
+//	  fits; if inline bytes alone already overflow (LARGE is not an option
+//	  for inline images — see append()), the builder surfaces an error.
+const (
+	maxTemplateContentBytes         int64 = 3 * 1024 * 1024
+	maxTemplateBodyInlineSmallBytes int64 = 50 * 1024 * 1024
+)
+
 // templateAttachment is the OAPI Attachment payload used in the templates
 // create/update request body. Fields align with
 // mail.open.access.v1_data_type.Attachment (id/filename/cid/is_inline/
@@ -297,10 +314,19 @@ func uploadToDriveForTemplate(ctx context.Context, runtime *common.RuntimeContex
 // entry SMALL / LARGE according to the projected EML size. Used by both
 // +template-create and +template-update so the LARGE-switch decision is
 // applied consistently across inline and non-inline entries.
+//
+// Two independent size ledgers run in parallel:
+//   - projectedSize (base64 EML projection) drives the 25 MB send-time
+//     LARGE switch (templateLargeSwitchThreshold).
+//   - rawBodyInlineSmall (body + inline + SMALL raw bytes) drives the 50 MB
+//     template-level cap (maxTemplateBodyInlineSmallBytes). LARGE attachments
+//     are excluded because they live on Drive and are fetched by URL, not
+//     embedded.
 type templateAttachmentBuilder struct {
-	projectedSize int64
-	largeBucket   bool
-	attachments   []templateAttachment
+	projectedSize      int64
+	rawBodyInlineSmall int64
+	largeBucket        bool
+	attachments        []templateAttachment
 }
 
 func newTemplateAttachmentBuilder(name, subject, content string, tos, ccs, bccs []templateMailAddr) *templateAttachmentBuilder {
@@ -317,16 +343,19 @@ func newTemplateAttachmentBuilder(name, subject, content string, tos, ccs, bccs 
 	for _, a := range bccs {
 		size += int64(len(a.Address) + len(a.Name) + 16)
 	}
-	return &templateAttachmentBuilder{projectedSize: size}
+	return &templateAttachmentBuilder{
+		projectedSize:      size,
+		rawBodyInlineSmall: int64(len(content)),
+	}
 }
 
 // append adds one attachment, picking SMALL or LARGE for non-inline entries
-// based on the projected EML size running total. Once largeBucket flips to
-// true, every subsequent non-inline attachment is LARGE regardless of size.
-// Inline images are always SMALL: they are referenced from the HTML body
-// via cid:<id> and therefore must be embedded in the MIME parts of the EML;
-// the LARGE flavor (server-rendered download URL) would break the <img src>
-// reference in every mail client.
+// based on the projected EML size running total and the 50 MB body+inline+
+// SMALL cap. Once largeBucket flips to true, every subsequent non-inline
+// attachment is LARGE regardless of size. Inline images are always SMALL:
+// they are referenced from the HTML body via cid:<id> and therefore must be
+// embedded in the MIME parts of the EML; the LARGE flavor (server-rendered
+// download URL) would break the <img src> reference in every mail client.
 func (b *templateAttachmentBuilder) append(fileKey, filename, cid string, isInline bool, fileSize int64) {
 	base64Size := estimateBase64EMLSize(fileSize)
 	aType := attachmentTypeSmall
@@ -334,12 +363,21 @@ func (b *templateAttachmentBuilder) append(fileKey, filename, cid string, isInli
 		// Inline images cannot be LARGE; still fold their base64 footprint
 		// into projectedSize so any subsequent non-inline attachment sees
 		// the correct cumulative EML size and flips to LARGE when needed.
+		// Raw bytes also count toward the 50 MB body+inline+SMALL cap; if
+		// inline alone overflows, finalize() will surface an error because
+		// we cannot bump inline to LARGE.
 		b.projectedSize += base64Size
-	} else if b.largeBucket || b.projectedSize+base64Size >= templateLargeSwitchThreshold {
+		b.rawBodyInlineSmall += fileSize
+	} else if b.largeBucket ||
+		b.projectedSize+base64Size >= templateLargeSwitchThreshold ||
+		b.rawBodyInlineSmall+fileSize > maxTemplateBodyInlineSmallBytes {
+		// Non-inline that would overflow either ledger → LARGE. LARGE is
+		// excluded from both totals (served by Drive URL, not in the EML).
 		aType = attachmentTypeLarge
 		b.largeBucket = true
 	} else {
 		b.projectedSize += base64Size
+		b.rawBodyInlineSmall += fileSize
 	}
 	b.attachments = append(b.attachments, templateAttachment{
 		ID:             fileKey,
@@ -354,6 +392,20 @@ func (b *templateAttachmentBuilder) append(fileKey, filename, cid string, isInli
 		// file bytes.
 		Body: fileKey,
 	})
+}
+
+// finalize runs after all attachments have been appended, validating the
+// 50 MB template-level ceiling on body+inline+SMALL raw bytes. The cap only
+// fires when inline images alone overflow it; non-inline overflow is
+// self-healing via the LARGE switch inside append().
+func (b *templateAttachmentBuilder) finalize() error {
+	if b.rawBodyInlineSmall > maxTemplateBodyInlineSmallBytes {
+		return fmt.Errorf("template body + inline images exceed %d MB (got %.1f MB); "+
+			"reduce inline image size or count — inline images cannot be promoted to LARGE",
+			maxTemplateBodyInlineSmallBytes/(1024*1024),
+			float64(b.rawBodyInlineSmall)/1024/1024)
+	}
+	return nil
 }
 
 // wrapTemplateContentIfNeeded mirrors the draft compose flow's plain-text →
@@ -432,6 +484,9 @@ func buildTemplatePayloadFromFlags(
 		builder.append(fileKey, filepath.Base(p), "", false, sz)
 	}
 
+	if err := builder.finalize(); err != nil {
+		return "", nil, err
+	}
 	return content, builder.attachments, nil
 }
 

@@ -97,6 +97,11 @@ var MailTemplateCreate = common.Shortcut{
 		bccs := renderTemplateAddresses(runtime.Str("bcc"))
 
 		content = wrapTemplateContentIfNeeded(content, isPlainText)
+		if int64(len(content)) > maxTemplateContentBytes {
+			return output.ErrValidation("template content exceeds %d MB (got %.1f MB)",
+				maxTemplateContentBytes/(1024*1024),
+				float64(len(content))/1024/1024)
+		}
 
 		rewritten, atts, err := buildTemplatePayloadFromFlags(
 			ctx, runtime, name, subject, content, tos, ccs, bccs,
