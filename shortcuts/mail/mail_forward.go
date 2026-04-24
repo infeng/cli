@@ -349,11 +349,19 @@ var MailForward = common.Shortcut{
 		allFiles = append(allFiles, userFiles...)
 		classified := classifyAttachments(allFiles, emlBase)
 
-		// Embed normal attachments.
+		// Embed normal attachments. Pass application/octet-stream instead of
+		// the original's declared content-type: the backend canonicalizes
+		// regular attachments to octet-stream on save/readback (see
+		// AddFileAttachment's comment in emlbuilder/builder.go:459). Forwarding
+		// an original image/png attachment with its real content-type trips
+		// the backend's is_inline heuristic — the draft read-back surfaces
+		// the attachment as is_inline=true with cid="" and the mail client
+		// drops it from the attachment list. Mirror AddFileAttachment's
+		// canonical type so originals round-trip as real attachments.
 		for _, f := range classified.Normal {
 			if f.Path == "" {
 				att := origAtts[f.SourceIndex]
-				bld = bld.AddAttachment(att.content, att.contentType, att.filename)
+				bld = bld.AddAttachment(att.content, "application/octet-stream", att.filename)
 			} else {
 				bld = bld.AddFileAttachment(f.Path)
 			}
