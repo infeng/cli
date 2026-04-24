@@ -320,13 +320,22 @@ func newTemplateAttachmentBuilder(name, subject, content string, tos, ccs, bccs 
 	return &templateAttachmentBuilder{projectedSize: size}
 }
 
-// append adds one attachment, picking SMALL or LARGE based on the projected
-// EML size running total. Once largeBucket flips to true, every subsequent
-// attachment is LARGE regardless of size.
+// append adds one attachment, picking SMALL or LARGE for non-inline entries
+// based on the projected EML size running total. Once largeBucket flips to
+// true, every subsequent non-inline attachment is LARGE regardless of size.
+// Inline images are always SMALL: they are referenced from the HTML body
+// via cid:<id> and therefore must be embedded in the MIME parts of the EML;
+// the LARGE flavor (server-rendered download URL) would break the <img src>
+// reference in every mail client.
 func (b *templateAttachmentBuilder) append(fileKey, filename, cid string, isInline bool, fileSize int64) {
 	base64Size := estimateBase64EMLSize(fileSize)
 	aType := attachmentTypeSmall
-	if b.largeBucket || b.projectedSize+base64Size >= templateLargeSwitchThreshold {
+	if isInline {
+		// Inline images cannot be LARGE; still fold their base64 footprint
+		// into projectedSize so any subsequent non-inline attachment sees
+		// the correct cumulative EML size and flips to LARGE when needed.
+		b.projectedSize += base64Size
+	} else if b.largeBucket || b.projectedSize+base64Size >= templateLargeSwitchThreshold {
 		aType = attachmentTypeLarge
 		b.largeBucket = true
 	} else {
