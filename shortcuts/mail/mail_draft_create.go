@@ -43,8 +43,8 @@ var MailDraftCreate = common.Shortcut{
 	HasFormat:   true,
 	Flags: []common.Flag{
 		{Name: "to", Desc: "Optional. Full To recipient list. Separate multiple addresses with commas. Display-name format is supported. When omitted, the draft is created without recipients (they can be added later via +draft-edit)."},
-		{Name: "subject", Desc: "Required. Final draft subject. Pass the full subject you want to appear in the draft.", Required: true},
-		{Name: "body", Desc: "Required. Full email body. Prefer HTML for rich formatting (bold, lists, links); plain text is also supported. Body type is auto-detected. Use --plain-text to force plain-text mode.", Required: true},
+		{Name: "subject", Desc: "Final draft subject. Pass the full subject you want to appear in the draft. Required unless --template-id supplies a non-empty subject."},
+		{Name: "body", Desc: "Full email body. Prefer HTML for rich formatting (bold, lists, links); plain text is also supported. Body type is auto-detected. Use --plain-text to force plain-text mode. Required unless --template-id supplies a non-empty body."},
 		{Name: "from", Desc: "Optional. Sender email address for the From header. When using an alias (send_as) address, set this to the alias and use --mailbox for the owning mailbox. If omitted, the mailbox's primary address is used."},
 		{Name: "mailbox", Desc: "Optional. Mailbox email address that owns the draft (default: falls back to --from, then me). Use this when the sender (--from) differs from the mailbox, e.g. sending via an alias or send_as address."},
 		{Name: "cc", Desc: "Optional. Full Cc recipient list. Separate multiple addresses with commas. Display-name format is supported."},
