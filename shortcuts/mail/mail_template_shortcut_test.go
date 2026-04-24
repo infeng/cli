@@ -557,6 +557,173 @@ func TestMailTemplateCreate_InlineImageRewrite(t *testing.T) {
 	}
 }
 
+// TestMailTemplateCreate_PrettyOutput covers the OutFormat pretty callback
+// for +template-create Execute.
+func TestMailTemplateCreate_PrettyOutput(t *testing.T) {
+	f, stdout, _, reg := mailShortcutTestFactory(t)
+	reg.Register(&httpmock.Stub{
+		Method: "POST",
+		URL:    "/user_mailboxes/me/templates",
+		Body: map[string]interface{}{
+			"code": 0,
+			"data": map[string]interface{}{
+				"template": map[string]interface{}{
+					"template_id": "tpl_pretty",
+					"name":        "Pretty",
+					"attachments": []interface{}{},
+				},
+			},
+		},
+	})
+	err := runMountedMailShortcut(t, MailTemplateCreate, []string{
+		"+template-create",
+		"--name", "Pretty",
+		"--template-content", "<p>x</p>",
+		"--format", "pretty",
+	}, f, stdout)
+	if err != nil {
+		t.Fatalf("pretty create failed: %v", err)
+	}
+	out := stdout.String()
+	if !strings.Contains(out, "Template created") || !strings.Contains(out, "tpl_pretty") {
+		t.Errorf("pretty output missing expected lines: %s", out)
+	}
+}
+
+// TestMailTemplateUpdate_PrettyInspect covers the OutFormat pretty callback
+// for +template-update --inspect.
+func TestMailTemplateUpdate_PrettyInspect(t *testing.T) {
+	f, stdout, _, reg := mailShortcutTestFactory(t)
+	reg.Register(&httpmock.Stub{
+		Method: "GET",
+		URL:    "/user_mailboxes/me/templates/50",
+		Body: map[string]interface{}{
+			"code": 0,
+			"data": map[string]interface{}{
+				"template": map[string]interface{}{
+					"template_id":        "50",
+					"name":               "PrettyInspect",
+					"subject":            "hi",
+					"is_plain_text_mode": true,
+				},
+			},
+		},
+	})
+	err := runMountedMailShortcut(t, MailTemplateUpdate, []string{
+		"+template-update",
+		"--template-id", "50",
+		"--inspect",
+		"--format", "pretty",
+	}, f, stdout)
+	if err != nil {
+		t.Fatalf("pretty inspect failed: %v", err)
+	}
+	out := stdout.String()
+	for _, want := range []string{"Template inspection", "template_id: 50", "name: PrettyInspect", "is_plain_text_mode: true", "subject: hi"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("pretty inspect missing %q in output: %s", want, out)
+		}
+	}
+}
+
+// TestMailTemplateUpdate_AllSetFlags covers all --set-* branches and the
+// attachment dedup + body-fill paths by providing a GET response that already
+// contains an attachment without Body.
+func TestMailTemplateUpdate_AllSetFlags(t *testing.T) {
+	f, stdout, _, reg := mailShortcutTestFactory(t)
+	reg.Register(&httpmock.Stub{
+		Method: "GET",
+		URL:    "/user_mailboxes/me/templates/60",
+		Body: map[string]interface{}{
+			"code": 0,
+			"data": map[string]interface{}{
+				"template": map[string]interface{}{
+					"template_id":        "60",
+					"name":               "Old",
+					"subject":            "old",
+					"template_content":   "<p>old</p>",
+					"is_plain_text_mode": false,
+					"attachments": []interface{}{
+						map[string]interface{}{
+							"id":              "existing_key",
+							"filename":        "old.pdf",
+							"is_inline":       false,
+							"attachment_type": 1,
+							// body intentionally omitted so the body-fill loop runs
+						},
+					},
+				},
+			},
+		},
+	})
+	putStub := &httpmock.Stub{
+		Method: "PUT",
+		URL:    "/user_mailboxes/me/templates/60",
+		Body: map[string]interface{}{
+			"code": 0,
+			"data": map[string]interface{}{
+				"template": map[string]interface{}{"template_id": "60"},
+			},
+		},
+	}
+	reg.Register(putStub)
+
+	err := runMountedMailShortcut(t, MailTemplateUpdate, []string{
+		"+template-update",
+		"--template-id", "60",
+		"--set-name", "New",
+		"--set-subject", "new-subj",
+		"--set-template-content", "<p>new body</p>",
+		"--set-plain-text",
+		"--set-to", "to@x",
+		"--set-cc", "cc@x",
+		"--set-bcc", "bcc@x",
+	}, f, stdout)
+	if err != nil {
+		t.Fatalf("update all-set failed: %v", err)
+	}
+	body := decodeCapturedBody(t, putStub)
+	tplWrap := body["template"].(map[string]interface{})
+	if tplWrap["name"] != "New" {
+		t.Errorf("name = %v", tplWrap["name"])
+	}
+	if tplWrap["is_plain_text_mode"] != true {
+		t.Errorf("plain_text = %v", tplWrap["is_plain_text_mode"])
+	}
+	// Body-fill: the existing attachment's body should have been set to its ID.
+	atts, _ := tplWrap["attachments"].([]interface{})
+	if len(atts) != 1 {
+		t.Fatalf("expected 1 attachment (no new --attach), got %#v", atts)
+	}
+	att := atts[0].(map[string]interface{})
+	if att["body"] != "existing_key" {
+		t.Errorf("body should be filled from ID, got %v", att["body"])
+	}
+}
+
+// TestMailTemplateCreate_DryRunWithInlineImage covers the DryRun inline-image
+// loop (parseLocalImgs branch + addTemplateUploadSteps per image).
+func TestMailTemplateCreate_DryRunWithInlineImage(t *testing.T) {
+	chdirTemp(t)
+	if err := os.WriteFile("logo.png", []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	f, stdout, _, _ := mailShortcutTestFactory(t)
+	err := runMountedMailShortcut(t, MailTemplateCreate, []string{
+		"+template-create",
+		"--name", "DR",
+		"--template-content", `<p><img src="logo.png"></p>`,
+		"--dry-run",
+	}, f, stdout)
+	if err != nil {
+		t.Fatalf("dry-run with inline: %v", err)
+	}
+	if !strings.Contains(stdout.String(), "upload_all") {
+		t.Errorf("expected upload_all step for inline logo, got %s", stdout.String())
+	}
+}
+
 // TestMailTemplateCreate_DryRun verifies the --dry-run path covers
 // addTemplateUploadSteps (small + large branches) without network.
 func TestMailTemplateCreate_DryRun(t *testing.T) {
@@ -633,6 +800,191 @@ func TestAddTemplateUploadSteps_Branches(t *testing.T) {
 	// coverage goal. The happy-path file hits the single-part branch and the
 	// missing path hits the "size unknown" fallback.
 	_ = api
+}
+
+// TestMailTemplateCreate_ContentFileMissing covers the resolveTemplateContent
+// file-open error branch and the Execute-level error propagation.
+func TestMailTemplateCreate_ContentFileMissing(t *testing.T) {
+	chdirTemp(t)
+	f, stdout, _, _ := mailShortcutTestFactory(t)
+	err := runMountedMailShortcut(t, MailTemplateCreate, []string{
+		"+template-create",
+		"--name", "X",
+		"--template-content-file", "missing.html",
+	}, f, stdout)
+	if err == nil || !strings.Contains(err.Error(), "open --template-content-file") {
+		t.Errorf("expected file-open error, got %v", err)
+	}
+}
+
+// TestMailTemplateCreate_ContentTooBig covers the maxTemplateContentBytes
+// check at Execute.
+func TestMailTemplateCreate_ContentTooBig(t *testing.T) {
+	f, stdout, _, _ := mailShortcutTestFactory(t)
+	big := strings.Repeat("x", 3*1024*1024+1) // > 3 MB cap
+	err := runMountedMailShortcut(t, MailTemplateCreate, []string{
+		"+template-create",
+		"--name", "Big",
+		"--template-content", big,
+	}, f, stdout)
+	if err == nil || !strings.Contains(err.Error(), "template content exceeds") {
+		t.Errorf("expected content-too-big error, got %v", err)
+	}
+}
+
+// TestMailTemplateCreate_CreateAPIError covers the createTemplate error-wrap
+// branch in Execute.
+func TestMailTemplateCreate_CreateAPIError(t *testing.T) {
+	f, stdout, _, reg := mailShortcutTestFactory(t)
+	reg.Register(&httpmock.Stub{
+		Method: "POST",
+		URL:    "/user_mailboxes/me/templates",
+		Body: map[string]interface{}{
+			"code": 1001,
+			"msg":  "server rejected",
+		},
+	})
+	err := runMountedMailShortcut(t, MailTemplateCreate, []string{
+		"+template-create",
+		"--name", "Err",
+		"--template-content", "<p>x</p>",
+	}, f, stdout)
+	if err == nil || !strings.Contains(err.Error(), "create template failed") {
+		t.Errorf("expected create-template error, got %v", err)
+	}
+}
+
+// TestMailTemplateUpdate_FetchAPIError covers the fetchTemplate error path.
+func TestMailTemplateUpdate_FetchAPIError(t *testing.T) {
+	f, stdout, _, reg := mailShortcutTestFactory(t)
+	reg.Register(&httpmock.Stub{
+		Method: "GET",
+		URL:    "/user_mailboxes/me/templates/99",
+		Body: map[string]interface{}{
+			"code": 2001,
+			"msg":  "template not found",
+		},
+	})
+	err := runMountedMailShortcut(t, MailTemplateUpdate, []string{
+		"+template-update",
+		"--template-id", "99",
+		"--set-subject", "x",
+	}, f, stdout)
+	if err == nil || !strings.Contains(err.Error(), "fetch template") {
+		t.Errorf("expected fetch error, got %v", err)
+	}
+}
+
+// TestMailTemplateUpdate_PatchFileMalformed covers both the patch-file open
+// miss and the JSON parse error branch.
+func TestMailTemplateUpdate_PatchFileMalformed(t *testing.T) {
+	chdirTemp(t)
+	if err := os.WriteFile("bad.json", []byte("{not json"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f, stdout, _, reg := mailShortcutTestFactory(t)
+	templateGetBody := map[string]interface{}{
+		"code": 0,
+		"data": map[string]interface{}{
+			"template": map[string]interface{}{"template_id": "88", "name": "x"},
+		},
+	}
+	reg.Register(&httpmock.Stub{Method: "GET", URL: "/user_mailboxes/me/templates/88", Body: templateGetBody})
+	reg.Register(&httpmock.Stub{Method: "GET", URL: "/user_mailboxes/me/templates/88", Body: templateGetBody})
+
+	err := runMountedMailShortcut(t, MailTemplateUpdate, []string{
+		"+template-update",
+		"--template-id", "88",
+		"--patch-file", "bad.json",
+	}, f, stdout)
+	if err == nil || !strings.Contains(err.Error(), "parse --patch-file") {
+		t.Errorf("expected parse error, got %v", err)
+	}
+
+	// Missing patch-file path.
+	err = runMountedMailShortcut(t, MailTemplateUpdate, []string{
+		"+template-update",
+		"--template-id", "88",
+		"--patch-file", "absent.json",
+	}, f, stdout)
+	if err == nil || !strings.Contains(err.Error(), "open --patch-file") {
+		t.Errorf("expected open error, got %v", err)
+	}
+}
+
+// TestExtractTemplatePayload_Errors covers the data-missing and JSON-error
+// branches.
+func TestExtractTemplatePayload_Errors(t *testing.T) {
+	// Nil-payload branch: passing nil data should return an error.
+	if _, err := extractTemplatePayload(nil); err == nil {
+		t.Errorf("expected error for nil data")
+	}
+	// Malformed: a non-string type in a string-typed JSON field round-trips
+	// through json.Marshal+Unmarshal and surfaces as an error.
+	bad := map[string]interface{}{
+		"template_id": []int{1, 2, 3}, // cannot unmarshal into string
+	}
+	if _, err := extractTemplatePayload(bad); err == nil {
+		t.Errorf("expected unmarshal error")
+	}
+}
+
+// TestFetchTemplateAttachmentURLs_FailedReasons covers the failed_reasons
+// warning-entry branch.
+func TestFetchTemplateAttachmentURLs_FailedReasons(t *testing.T) {
+	f, stdout, _, reg := mailShortcutTestFactory(t)
+	// Fetch with an attachment that the server marks failed — the embed path
+	// should surface the warning but not crash.
+	reg.Register(&httpmock.Stub{
+		Method: "GET",
+		URL:    "/user_mailboxes/me/profile",
+		Body: map[string]interface{}{
+			"code": 0,
+			"data": map[string]interface{}{"primary_email_address": "me@example.com"},
+		},
+	})
+	reg.Register(&httpmock.Stub{
+		Method: "GET",
+		URL:    "/user_mailboxes/me/templates/33",
+		Body: map[string]interface{}{
+			"code": 0,
+			"data": map[string]interface{}{
+				"template": map[string]interface{}{
+					"template_id":      "33",
+					"name":             "F",
+					"template_content": `<p>plain</p>`,
+					"attachments": []interface{}{
+						map[string]interface{}{"id": "bad_key", "filename": "x.pdf", "is_inline": false, "attachment_type": 1},
+					},
+				},
+			},
+		},
+	})
+	reg.Register(&httpmock.Stub{
+		Method: "GET",
+		URL:    "/user_mailboxes/me/templates/33/attachments/download_url",
+		Body: map[string]interface{}{
+			"code": 0,
+			"data": map[string]interface{}{
+				"download_urls": []interface{}{},
+				"failed_reasons": []interface{}{
+					map[string]interface{}{"attachment_id": "bad_key", "reason": "expired"},
+				},
+			},
+		},
+	})
+	// Draft save won't be reached: embed* returns an error when the URL map
+	// has no entry for an ID. Run and expect an error bubbling that message.
+	err := runMountedMailShortcut(t, MailSend, []string{
+		"+send",
+		"--to", "alice@example.com",
+		"--subject", "s",
+		"--body", "<p>b</p>",
+		"--template-id", "33",
+	}, f, stdout)
+	if err == nil || !strings.Contains(err.Error(), "download URL not returned") {
+		t.Errorf("expected download-URL-missing error (with failed_reasons warning), got %v", err)
+	}
 }
 
 // TestMailSend_TemplateIDAppliesInlineAndSmall exercises the full +send
