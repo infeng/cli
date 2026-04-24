@@ -141,8 +141,10 @@ var MailTemplateUpdate = common.Shortcut{
 		if err != nil {
 			return err
 		}
+		contentChanged := false
 		if newContent != "" {
 			tpl.TemplateContent = newContent
+			contentChanged = true
 		}
 		if runtime.Bool("set-plain-text") {
 			tpl.IsPlainTextMode = true
@@ -174,7 +176,20 @@ var MailTemplateUpdate = common.Shortcut{
 			if err := json.Unmarshal(buf, &patch); err != nil {
 				return output.ErrValidation("parse --patch-file %s: %v", pf, err)
 			}
+			if patch.TemplateContent != nil {
+				contentChanged = true
+			}
 			applyTemplatePatchFile(tpl, &patch)
+		}
+
+		// Apply plain-text → HTML line-break upgrade to newly supplied content
+		// so template preview renders line breaks the same way a draft composed
+		// from this template would render after sending. Only transform when
+		// this update call actually changed the content: if the user left the
+		// body alone, we must not re-wrap what the server already stored (doing
+		// so would double-wrap existing HTML bodies on every update).
+		if contentChanged {
+			tpl.TemplateContent = wrapTemplateContentIfNeeded(tpl.TemplateContent, tpl.IsPlainTextMode)
 		}
 
 		// Re-resolve <img> references against the (possibly updated) content.

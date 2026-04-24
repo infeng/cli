@@ -96,6 +96,8 @@ var MailTemplateCreate = common.Shortcut{
 		ccs := renderTemplateAddresses(runtime.Str("cc"))
 		bccs := renderTemplateAddresses(runtime.Str("bcc"))
 
+		content = wrapTemplateContentIfNeeded(content, isPlainText)
+
 		rewritten, atts, err := buildTemplatePayloadFromFlags(
 			ctx, runtime, name, subject, content, tos, ccs, bccs,
 			splitByComma(runtime.Str("attach")),

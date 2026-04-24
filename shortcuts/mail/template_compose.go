@@ -347,6 +347,29 @@ func (b *templateAttachmentBuilder) append(fileKey, filename, cid string, isInli
 	})
 }
 
+// wrapTemplateContentIfNeeded mirrors the draft compose flow's plain-text →
+// HTML upgrade (shortcuts/mail/mail_quote.go:buildBodyDiv): when the
+// template is not marked as pure plain-text mode AND the content is not
+// already HTML, HTML-escape the content and convert newlines to <br> so
+// the PC client renders line breaks in template preview. Without this, a
+// three-line plain body saved verbatim renders as a single run-on line
+// because HTML collapses whitespace. The mail compose flow added this
+// transform at mail_quote.go:258 so sent emails carry <br>; templates
+// need the same treatment so preview matches what sending a draft
+// composed from the template would produce.
+func wrapTemplateContentIfNeeded(content string, isPlainText bool) string {
+	if content == "" {
+		return content
+	}
+	if isPlainText {
+		return content
+	}
+	if bodyIsHTML(content) {
+		return content
+	}
+	return buildBodyDiv(content, false)
+}
+
 // buildTemplatePayloadFromFlags processes HTML inline images and non-inline
 // attachment flags in the exact order required by the spec: inline images in
 // HTML <img> order, non-inline attachments in --attach / --attachment
