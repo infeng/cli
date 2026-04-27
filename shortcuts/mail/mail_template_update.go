@@ -207,6 +207,24 @@ var MailTemplateUpdate = common.Shortcut{
 			return err
 		}
 		tpl.TemplateContent = rewritten
+		// When the body changed, drop existing inline attachments whose CID
+		// is no longer referenced in the new template_content. Otherwise
+		// every <img> replace/delete leaves an orphan Drive-backed row
+		// behind and the template eventually trips TemplateTotalSizeLimit.
+		// Non-inline attachments are kept regardless because they aren't
+		// addressed via cid: refs. Skipped when the body wasn't touched —
+		// the existing cid: refs in the stored content still reference all
+		// existing inline rows, so removing any would break the template.
+		if contentChanged {
+			kept := tpl.Attachments[:0]
+			for _, a := range tpl.Attachments {
+				if a.IsInline && a.CID != "" && !strings.Contains(tpl.TemplateContent, "cid:"+a.CID) {
+					continue
+				}
+				kept = append(kept, a)
+			}
+			tpl.Attachments = kept
+		}
 		// Merge: keep existing template attachments (already uploaded, have
 		// file_keys), append newly uploaded ones. The EML-size/LARGE switch
 		// applies independently per call because this is a full-replace PUT.

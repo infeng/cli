@@ -77,7 +77,9 @@ var MailForward = common.Shortcut{
 		if err := validateSendTime(runtime); err != nil {
 			return err
 		}
-		if runtime.Bool("confirm-send") {
+		// With --template-id, recipients may come from the template; defer
+		// the check to Execute (post-applyTemplate). Mirrors +send.
+		if runtime.Bool("confirm-send") && runtime.Str("template-id") == "" {
 			if err := validateComposeHasAtLeastOneRecipient(runtime.Str("to"), runtime.Str("cc"), runtime.Str("bcc")); err != nil {
 				return err
 			}
@@ -179,6 +181,15 @@ var MailForward = common.Shortcut{
 			})
 		}
 		subjectOverride := strings.TrimSpace(runtime.Str("subject"))
+
+		// Post-merge recipient check for --confirm-send + --template-id:
+		// Validate skipped this when a template was supplied; enforce it now
+		// after applyTemplate has folded in the template addresses.
+		if confirmSend && templateID != "" {
+			if err := validateComposeHasAtLeastOneRecipient(to, ccFlag, bccFlag); err != nil {
+				return err
+			}
+		}
 
 		if err := validateRecipientCount(to, ccFlag, bccFlag); err != nil {
 			return err
@@ -417,15 +428,35 @@ var MailForward = common.Shortcut{
 			fmt.Fprintf(runtime.IO().ErrOut, "  %d large attachment(s) uploaded (download links in body)\n", len(classified.Oversized))
 		}
 
-		if len(largeAttIDs) > 0 {
-			idsJSON, err := json.Marshal(largeAttIDs)
+		// Merge forward-derived (originals + user uploads) with
+		// template-supplied LARGE attachment file_keys into a single header
+		// value. emlbuilder.Builder.Header() appends; emitting two
+		// X-Lms-Large-Attachment-Ids lines causes the server (and most
+		// RFC 5322 parsers) to read only the first, silently dropping the
+		// other set. Dedup by ID so a template that re-uses a forwarded
+		// LARGE file_key doesn't double-register the reference.
+		seenLargeID := make(map[string]bool, len(largeAttIDs)+len(templateLargeAttachmentIDs))
+		mergedLargeAttIDs := make([]largeAttID, 0, len(largeAttIDs)+len(templateLargeAttachmentIDs))
+		for _, e := range largeAttIDs {
+			if e.ID == "" || seenLargeID[e.ID] {
+				continue
+			}
+			seenLargeID[e.ID] = true
+			mergedLargeAttIDs = append(mergedLargeAttIDs, e)
+		}
+		for _, id := range templateLargeAttachmentIDs {
+			if id == "" || seenLargeID[id] {
+				continue
+			}
+			seenLargeID[id] = true
+			mergedLargeAttIDs = append(mergedLargeAttIDs, largeAttID{ID: id})
+		}
+		if len(mergedLargeAttIDs) > 0 {
+			idsJSON, err := json.Marshal(mergedLargeAttIDs)
 			if err != nil {
 				return fmt.Errorf("failed to encode large attachment IDs: %w", err)
 			}
 			bld = bld.Header(draftpkg.LargeAttachmentIDsHeader, base64.StdEncoding.EncodeToString(idsJSON))
-		}
-		if hdr, hdrErr := encodeTemplateLargeAttachmentHeader(templateLargeAttachmentIDs); hdrErr == nil && hdr != "" {
-			bld = bld.Header(draftpkg.LargeAttachmentIDsHeader, hdr)
 		}
 		rawEML, err := bld.BuildBase64URL()
 		if err != nil {
