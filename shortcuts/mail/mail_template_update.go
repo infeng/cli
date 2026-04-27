@@ -33,9 +33,9 @@ var MailTemplateUpdate = common.Shortcut{
 		{Name: "set-template-content", Desc: "Replace the template body content. Prefer HTML for rich formatting."},
 		{Name: "set-template-content-file", Desc: "Replace template body content with the contents of a file (relative path only). Mutually exclusive with --set-template-content."},
 		{Name: "set-plain-text", Type: "bool", Desc: "Set is_plain_text_mode=true."},
-		{Name: "set-to", Desc: "Replace the To recipient list. Separate multiple addresses with commas."},
-		{Name: "set-cc", Desc: "Replace the Cc recipient list."},
-		{Name: "set-bcc", Desc: "Replace the Bcc recipient list."},
+		{Name: "set-to", Desc: "Replace the To recipient list. Separate multiple addresses with commas. Pass --set-to=\"\" to clear the list."},
+		{Name: "set-cc", Desc: "Replace the Cc recipient list. Pass --set-cc=\"\" to clear the list."},
+		{Name: "set-bcc", Desc: "Replace the Bcc recipient list. Pass --set-bcc=\"\" to clear the list."},
 		{Name: "attach", Desc: "Additional non-inline attachment file path(s), comma-separated. Each file is uploaded to Drive and appended to the template's attachments[] in the exact flag order."},
 	},
 	DryRun: func(ctx context.Context, runtime *common.RuntimeContext) *common.DryRunAPI {
@@ -149,14 +149,17 @@ var MailTemplateUpdate = common.Shortcut{
 		if runtime.Bool("set-plain-text") {
 			tpl.IsPlainTextMode = true
 		}
-		if v := runtime.Str("set-to"); v != "" {
-			tpl.Tos = renderTemplateAddresses(v)
+		// Use Changed() so an explicit empty value (--set-to="") clears the
+		// list. The non-empty-only check would treat clear and "not provided"
+		// the same and silently drop the clear.
+		if runtime.Changed("set-to") {
+			tpl.Tos = renderTemplateAddresses(runtime.Str("set-to"))
 		}
-		if v := runtime.Str("set-cc"); v != "" {
-			tpl.Ccs = renderTemplateAddresses(v)
+		if runtime.Changed("set-cc") {
+			tpl.Ccs = renderTemplateAddresses(runtime.Str("set-cc"))
 		}
-		if v := runtime.Str("set-bcc"); v != "" {
-			tpl.Bccs = renderTemplateAddresses(v)
+		if runtime.Changed("set-bcc") {
+			tpl.Bccs = renderTemplateAddresses(runtime.Str("set-bcc"))
 		}
 
 		// Apply JSON patch file (simple shallow merge). This is a convenience

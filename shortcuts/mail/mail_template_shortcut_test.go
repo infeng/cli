@@ -701,6 +701,67 @@ func TestMailTemplateUpdate_AllSetFlags(t *testing.T) {
 	}
 }
 
+// TestMailTemplateUpdate_SetEmptyClearsAddrs verifies --set-to="" /
+// --set-cc="" / --set-bcc="" each clear the corresponding address list
+// while a non-passed flag leaves it untouched.
+func TestMailTemplateUpdate_SetEmptyClearsAddrs(t *testing.T) {
+	f, stdout, _, reg := mailShortcutTestFactory(t)
+	reg.Register(&httpmock.Stub{
+		Method: "GET",
+		URL:    "/user_mailboxes/me/templates/61",
+		Body: map[string]interface{}{
+			"code": 0,
+			"data": map[string]interface{}{
+				"template": map[string]interface{}{
+					"template_id":        "61",
+					"name":               "Old",
+					"subject":            "old",
+					"template_content":   "<p>old</p>",
+					"is_plain_text_mode": false,
+					"tos":                []interface{}{map[string]interface{}{"mail_address": "keep-to@x"}},
+					"ccs":                []interface{}{map[string]interface{}{"mail_address": "drop-cc@x"}},
+					"bccs":               []interface{}{map[string]interface{}{"mail_address": "drop-bcc@x"}},
+				},
+			},
+		},
+	})
+	putStub := &httpmock.Stub{
+		Method: "PUT",
+		URL:    "/user_mailboxes/me/templates/61",
+		Body: map[string]interface{}{
+			"code": 0,
+			"data": map[string]interface{}{"template": map[string]interface{}{"template_id": "61"}},
+		},
+	}
+	reg.Register(putStub)
+
+	err := runMountedMailShortcut(t, MailTemplateUpdate, []string{
+		"+template-update",
+		"--template-id", "61",
+		"--set-cc=",  // explicit clear
+		"--set-bcc=", // explicit clear
+		// --set-to omitted on purpose: must remain untouched
+	}, f, stdout)
+	if err != nil {
+		t.Fatalf("update clear-addrs failed: %v", err)
+	}
+	body := decodeCapturedBody(t, putStub)
+	tplWrap := body["template"].(map[string]interface{})
+	if tos, ok := tplWrap["tos"].([]interface{}); !ok || len(tos) != 1 {
+		t.Errorf("tos should be left intact (1 entry), got %#v", tplWrap["tos"])
+	}
+	if ccs, ok := tplWrap["ccs"]; ok && ccs != nil {
+		if list, _ := ccs.([]interface{}); len(list) != 0 {
+			t.Errorf("ccs should be cleared, got %#v", ccs)
+		}
+	}
+	if bccs, ok := tplWrap["bccs"]; ok && bccs != nil {
+		if list, _ := bccs.([]interface{}); len(list) != 0 {
+			t.Errorf("bccs should be cleared, got %#v", bccs)
+		}
+	}
+}
+
 // TestMailTemplateCreate_DryRunWithInlineImage covers the DryRun inline-image
 // loop (parseLocalImgs branch + addTemplateUploadSteps per image).
 func TestMailTemplateCreate_DryRunWithInlineImage(t *testing.T) {
