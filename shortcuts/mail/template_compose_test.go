@@ -285,22 +285,27 @@ func TestTemplateAttachmentBuilder_InlineOverflowSurfaces(t *testing.T) {
 // wrapTemplateContentIfNeeded
 // ---------------------------------------------------------------------------
 
-// TestWrapTemplateContentIfNeeded verifies the 4 branches.
+// TestWrapTemplateContentIfNeeded verifies the wrap behavior. Plain-text
+// templates also get HTML-wrapped here so the preview keeps line breaks; the
+// is_plain_text_mode flag is honored on the apply/send side via a HTML→text
+// strip pass in mergeTemplateBody.
 func TestWrapTemplateContentIfNeeded(t *testing.T) {
 	if got := wrapTemplateContentIfNeeded("", false); got != "" {
 		t.Errorf("empty pass-through, got %q", got)
 	}
-	if got := wrapTemplateContentIfNeeded("hi\nthere", true); got != "hi\nthere" {
-		t.Errorf("plain-text should pass through, got %q", got)
-	}
 	if got := wrapTemplateContentIfNeeded("<p>x</p>", false); got != "<p>x</p>" {
 		t.Errorf("already-HTML should pass through, got %q", got)
 	}
-	// Plain text body in HTML mode → transformed. We don't assert exact output
-	// (buildBodyDiv owns it) but assert the content is wrapped / line-broken.
+	// Plain text body in HTML mode → transformed.
 	got := wrapTemplateContentIfNeeded("line1\nline2", false)
-	if got == "line1\nline2" || !strings.Contains(got, "line1") {
-		t.Errorf("expected wrapped body, got %q", got)
+	if got == "line1\nline2" || !strings.Contains(got, "line1") || !strings.Contains(got, "<br>") {
+		t.Errorf("expected wrapped body with <br>, got %q", got)
+	}
+	// Plain text body in plain-text mode → ALSO transformed so the preview
+	// shows line breaks. The flag does not gate the wrap.
+	gotPT := wrapTemplateContentIfNeeded("hi\nthere", true)
+	if !strings.Contains(gotPT, "hi") || !strings.Contains(gotPT, "<br>") || !strings.Contains(gotPT, "there") {
+		t.Errorf("plain-text should also be wrapped, got %q", gotPT)
 	}
 }
 
@@ -556,6 +561,33 @@ func TestMergeTemplateBody_ReplyPlainText(t *testing.T) {
 	}
 	if got := mergeTemplateBody(templateShortcutReply, tpl, "", ""); got != "tpl" {
 		t.Errorf("reply empty draft should return tpl, got %q", got)
+	}
+}
+
+// TestMergeTemplateBody_PlainTextStripsHTML verifies plain-text-mode templates
+// whose stored content is HTML-wrapped (per the preview-friendly storage
+// format) get their HTML stripped back to real newlines before injection,
+// so the recipient sees plain text instead of literal <div>...</div> markup.
+func TestMergeTemplateBody_PlainTextStripsHTML(t *testing.T) {
+	tpl := &templatePayload{
+		IsPlainTextMode: true,
+		TemplateContent: "<div>第一行</div><div>第二行</div><div>第三行</div>",
+	}
+	got := mergeTemplateBody(templateShortcutSend, tpl, "", "")
+	want := "第一行\n第二行\n第三行"
+	if got != want {
+		t.Errorf("HTML-wrapped plain-text template should strip back to newlines\n got: %q\nwant: %q", got, want)
+	}
+	// buildBodyDiv-wrapped form produced by wrapTemplateContentIfNeeded for
+	// CLI-created plain-text templates: round-trip should also yield clean
+	// newlines.
+	tpl2 := &templatePayload{
+		IsPlainTextMode: true,
+		TemplateContent: `<div style="word-break:break-word;line-height:1.6;font-size:14px;color:rgb(0,0,0);">a<br>b<br>c</div>`,
+	}
+	got = mergeTemplateBody(templateShortcutSend, tpl2, "", "")
+	if got != "a\nb\nc" {
+		t.Errorf("buildBodyDiv-wrapped → plain text: got %q want %q", got, "a\nb\nc")
 	}
 }
 

@@ -413,20 +413,16 @@ func (b *templateAttachmentBuilder) finalize() error {
 }
 
 // wrapTemplateContentIfNeeded mirrors the draft compose flow's plain-text →
-// HTML upgrade (shortcuts/mail/mail_quote.go:buildBodyDiv): when the
-// template is not marked as pure plain-text mode AND the content is not
-// already HTML, HTML-escape the content and convert newlines to <br> so
-// the PC client renders line breaks in template preview. Without this, a
-// three-line plain body saved verbatim renders as a single run-on line
-// because HTML collapses whitespace. The mail compose flow added this
-// transform at mail_quote.go:258 so sent emails carry <br>; templates
-// need the same treatment so preview matches what sending a draft
-// composed from the template would produce.
+// HTML upgrade (shortcuts/mail/mail_quote.go:buildBodyDiv): HTML-escape the
+// content and convert newlines to <br> so the PC client renders line breaks
+// in template preview. Without this, a three-line plain body saved verbatim
+// renders as a single run-on line because HTML collapses whitespace. The
+// transform is applied for both is_plain_text_mode=true and =false; the
+// preview always renders the stored content as HTML, and the send path
+// reads is_plain_text_mode separately to decide whether to strip back to
+// plain text (see mergeTemplateBody).
 func wrapTemplateContentIfNeeded(content string, isPlainText bool) string {
 	if content == "" {
-		return content
-	}
-	if isPlainText {
 		return content
 	}
 	if bodyIsHTML(content) {
@@ -767,6 +763,17 @@ func mergeTemplateBody(kind templateShortcutKind, tpl *templatePayload, draftBod
 	// area (draft_body = user_body for send/draft-create).
 	if userBody != "" {
 		draftBody = userBody
+	}
+
+	// Plain-text-mode templates store content as HTML (so the preview shows
+	// line breaks) but the email body must be sent as plain text. Reverse
+	// the wrapping here using stripHTMLForQuote (which already converts
+	// <br>/</div> into \n and unescapes entities) so the recipient sees
+	// real newlines instead of literal <div>...</div> markup. Templates
+	// authored via the Lark client use the same HTML-wrapped storage, so
+	// this also fixes apply for client-authored plain-text templates.
+	if tpl.IsPlainTextMode && bodyIsHTML(tplContent) {
+		tplContent = stripHTMLForQuote(tplContent)
 	}
 
 	// Plain-text mode: simple append.
