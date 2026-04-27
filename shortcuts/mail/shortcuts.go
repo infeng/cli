@@ -22,6 +22,7 @@ func Shortcuts() []common.Shortcut {
 		MailSendReceipt,
 		MailDeclineReceipt,
 		MailSignature,
+		MailShareToChat,
 		MailTemplateCreate,
 		MailTemplateUpdate,
 	}
