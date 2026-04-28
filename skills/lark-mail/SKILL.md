@@ -419,48 +419,48 @@ lark-cli mail <resource> <method> [flags] # 调用 API
 
 ### user_mailboxes
 
-  - `accessible_mailboxes` — 获取主账号的所有可访问邮箱，包括主邮箱和公共邮箱
-  - `profile` — 用于在用户身份下获取自己的邮箱主地址
+  - `accessible_mailboxes` — 列出可访问的邮箱
+  - `profile` — 获取用户邮箱信息
   - `search` — 搜索邮件
 
 ### user_mailbox.drafts
 
   - `cancel_scheduled_send` — 取消定时发送
   - `create` — 创建草稿
-  - `delete` — 删除指定邮箱账户下的单份邮件草稿。注意：对于草稿状态的邮件，只能使用本接口删除，禁止使用 trash_message；被删除的草稿数据无法恢复，请谨慎使用。
-  - `get` — 获取草稿详情
-  - `list` — 拉取草稿列表
+  - `delete` — 删除草稿
+  - `get` — 获取草稿内容
+  - `list` — 列出草稿列表
   - `send` — 发送草稿
   - `update` — 更新草稿
 
 ### user_mailbox.event
 
-  - `subscribe` — 订阅收信事件
-  - `subscription` — 查询订阅的收信事件
-  - `unsubscribe` — 取消订阅收信事件
+  - `subscribe` — 订阅事件
+  - `subscription` — 获取订阅状态
+  - `unsubscribe` — 取消订阅
 
 ### user_mailbox.folders
 
   - `create` — 创建邮箱文件夹
-  - `delete` — 删除用户文件夹。删除后文件夹数据无法恢复，请谨慎使用；删除文件夹会将该文件夹下的邮件移至已删除文件夹中。
-  - `get` — 获取指定邮箱账户下的单个邮件文件夹详情
-  - `list` — 列出用户文件夹，可获取文件夹名称、文件夹ID、文件夹下的未读邮件和未读会话数量
-  - `patch` — 更新用户文件夹
+  - `delete` — 删除邮箱文件夹
+  - `get` — 获取邮箱文件夹信息
+  - `list` — 列出邮箱文件夹
+  - `patch` — 修改邮箱文件夹
 
 ### user_mailbox.labels
 
-  - `create` — 根据用户指定的名称、颜色等信息，创建邮件标签
-  - `delete` — 删除用户指定的标签，注意，删除的标签无法恢复
-  - `get` — 根据指定ID，获取邮件标签信息，包括名称、未读数据、颜色等信息
-  - `list` — 列出邮件标签，包括ID、名称、颜色、未读信息等内容
-  - `patch` — 更新邮件标签
+  - `create` — 创建标签
+  - `delete` — 删除标签
+  - `get` — 获取标签信息
+  - `list` — 列出标签
+  - `patch` — 更新标签
 
 ### user_mailbox.mail_contacts
 
   - `create` — 创建邮箱联系人
-  - `delete` — 删除指定的邮箱联系人
+  - `delete` — 删除邮箱联系人
   - `list` — 列出邮箱联系人
-  - `patch` — 更新邮箱联系人
+  - `patch` — 修改邮箱联系人信息
 
 ### user_mailbox.message.attachments
 
@@ -468,31 +468,31 @@ lark-cli mail <resource> <method> [flags] # 调用 API
 
 ### user_mailbox.messages
 
-  - `batch_get` — 通过指定邮件ID，获取对应邮件的标签、文件夹、摘要、正文、html、附件等信息。注意，如需获取摘要、正文、主题或收发件人地址，需要申请对应的字段权限。
-  - `batch_modify` — 本接口提供修改邮件的能力，支持移动邮件的文件夹、给邮件添加和移除标签、标记邮件读和未读、移动邮件至垃圾邮件等能力。不支持移动邮件到已删除文件夹，如需，请使用批量删除邮件接口。
-  - `batch_trash` — 通过指定邮件ID，批量移动邮件到已删除文件夹
+  - `batch_get` — 批量获取邮件详情
+  - `batch_modify` — 批量修改邮件
+  - `batch_trash` — 批量删除邮件
   - `get` — 获取邮件详情
-  - `list` — 根据用户指定的标签或文件夹，列出对应位置下的邮件列表。注意，必须填写folder_id或label_id中的一个字段。
-  - `modify` — 本接口提供修改邮件的能力，支持移动邮件的文件夹、给邮件添加和移除标签、标记邮件已读和未读、移动邮件至垃圾邮件等能力。不支持移动邮件到已删除文件夹，如需删除邮件，请使用删除邮件接口。至少填写add_label_ids、remove_label_ids、add_folder中的一个参数。
+  - `list` — 列出邮件
+  - `modify` — 修改邮件
   - `send_status` — 查询邮件发送状态
-  - `trash` — 移动邮件到已删除文件夹。注意，该接口无法删除草稿，如需删除草稿，请使用删除草稿接口
+  - `trash` — 删除邮件
 
 ### user_mailbox.rules
 
   - `create` — 创建收信规则
   - `delete` — 删除收信规则
   - `list` — 列出收信规则
-  - `reorder` — 
-  - `update` — 
+  - `reorder` — 对收信规则进行排序
+  - `update` — 更新收信规则
 
 ### user_mailbox.sent_messages
 
-  - `get_recall_detail` — 查询指定邮件的撤回结果详情，包括整体撤回进度、成功/失败/处理中的收件人数量，以及每个收件人的撤回状态和失败原因。
-  - `recall` — 撤回指定邮件。前置条件：邮件须已投递，且发送时间在 24 小时以内；搬家中的域名不支持撤回。返回说明：若用户或邮件不满足撤回条件，接口仍返回 200，响应体中 recall_status 为 unavailable，recall_restriction_reason 标明具体原因。返回成功仅表示撤回请求已受理，实际撤回结果请调用「查询邮件撤回进度」接口获取。
+  - `get_recall_detail` — 查询邮件撤回进度
+  - `recall` — 撤回已发送的邮件
 
 ### user_mailbox.settings
 
-  - `send_as` — 获取账号的所有可发信地址，包括主地址、别名地址、邮件组。可以使用用户地址访问该接口，也可以使用用户有权限的公共邮箱地址访问该接口。
+  - `send_as` — 列出可发信邮箱
 
 ### user_mailbox.template.attachments
 
@@ -508,12 +508,12 @@ lark-cli mail <resource> <method> [flags] # 调用 API
 
 ### user_mailbox.threads
 
-  - `batch_modify` — 本接口提供修改邮件会话的能力，支持移动邮件会话的文件夹、给邮件会话添加和移除标签、标记邮件会话读和未读、移动邮件会话至垃圾邮件等能力。不支持移动邮件会话到已删除文件夹，如需，请使用批量删除邮件会话接口。
-  - `batch_trash` — 通过指定邮件会话ID，批量移动邮件到已删除文件夹
-  - `get` — 通过用户邮箱地址和邮件会话ID，获取该会话下的所有邮件关键信息列表。如需查询主题、正文、摘要、收发件人信息，请申请字段权限。
-  - `list` — 通过指定文件夹或标签，列出对应位置下的邮件会话列表。接口可返回邮件会话ID和会话下最新一封邮件的摘要。folder_id 和 label_id 必须且只能提供一个。
-  - `modify` — 本接口提供修改邮件会话的能力，支持移动邮件会话的文件夹、给邮件会话添加和移除标签、标记邮件会话读和未读、移动邮件会话至垃圾邮件等能力。不支持移动邮件会话到已删除文件夹，如需，请使用删除邮件会话接口。至少填写add_label_ids、remove_label_ids、add_folder中的一个参数。
-  - `trash` — 移动指定的邮件会话到已删除文件夹
+  - `batch_modify` — 批量修改邮件会话
+  - `batch_trash` — 批量删除邮件会话
+  - `get` — 获取邮件会话详情
+  - `list` — 列出邮件会话
+  - `modify` — 修改邮件会话
+  - `trash` — 删除邮件会话
 
 ## 权限表
 
