@@ -75,6 +75,7 @@ func TestCalendar_ManageCalendar(t *testing.T) {
 				Params: map[string]any{
 					"calendar_id": createdCalendarID,
 				},
+				Yes: true,
 			})
 			clie2e.ReportCleanupFailure(parentT, "delete calendar "+createdCalendarID, deleteResult, deleteErr)
 		})

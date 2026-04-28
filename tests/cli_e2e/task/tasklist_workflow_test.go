@@ -170,7 +170,6 @@ func TestTask_TasklistWorkflowAsUser(t *testing.T) {
 				"tasklist":      map[string]any{"name": patchedTasklistName},
 				"update_fields": []string{"name"},
 			},
-			Yes: true,
 		})
 		require.NoError(t, err)
 		result.AssertExitCode(t, 0)

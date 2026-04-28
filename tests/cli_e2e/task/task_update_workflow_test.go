@@ -132,7 +132,6 @@ func TestTask_UpdateWorkflow(t *testing.T) {
 				},
 				"update_fields": []string{"summary", "description"},
 			},
-			Yes: true,
 		})
 		require.NoError(t, err)
 		result.AssertExitCode(t, 0)
