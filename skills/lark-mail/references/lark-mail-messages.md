@@ -99,6 +99,18 @@ lark-cli mail +messages --message-ids <id1>,<id2> --html=false --format json
 # 检查 subject/from/body_preview 或 body_plain_text，对比意图和下一步操作
 ```
 
+## ⛔ 空结果处理
+
+`+messages` 按多个 `--message-ids` 批量取邮件，"批量取不到"分三种语义，必须区分上报。**禁止**对取不到的 ID 通过 `+send` / `+draft-create` 等写操作凭空补造一封邮件来"凑齐"返回集。
+
+| 情形 | 表现 | 正确做法 |
+|------|------|----------|
+| 部分或全部空数组 | `data.messages` 长度 < 输入的 `--message-ids` 数量；缺失的 ID 不在返回里 | 回报"以下 message_id 未取到（可能已删除或 ID 错误）：…"，列出未命中的 ID；其余正常返回的邮件按原计划处理 |
+| 404（资源不存在） | 接口对个别 ID 返回 `NOT_FOUND`，或整批失败 | 区分"个别失败"与"整批失败"分别回报；个别失败时给出未命中清单，整批失败时请用户检查 ID 来源 |
+| 网络 / 权限错误（5xx / 401 / 403） | 5xx、401、403 或网络超时 | 回报错误类别（鉴权 / 权限 / 网络）并提示用户重试或检查 `--as` 身份与 scope；**不要**当作"邮件不存在"继续推进 |
+
+> 详见 SKILL.md 「## ⛔ Non-goals（不应做的事）」第 1 条 与 「## ⚠️ 安全规则」第 9 条。
+
 ## 相关命令
 
 - `lark-cli mail +message` — 读取单封邮件

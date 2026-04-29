@@ -116,6 +116,18 @@ tip: use mail +message --message-id <id> to read full content
 
 搜索路径（使用 `--query` 或 `from`/`to`/`subject` 等 filter）的分页结果在**同一翻页链内**保持一致（无重复、无丢失）。但不同 `--max` 值发起的独立搜索可能返回不同排序，这是搜索 API 的固有行为。列表路径（仅 `folder`/`label` 筛选）无此限制。
 
+## ⛔ 空结果处理
+
+`+triage` 的"无结果"分三种语义，必须区分上报，**禁止**为了让流程"看起来有进展"而调用任何写操作（包括 `+send`、`folders.create`、`labels.create` 等）凭空构造邮件 / 文件夹 / 标签来满足下一步动作。
+
+| 情形 | 表现 | 正确做法 |
+|------|------|----------|
+| 空数组（200 OK） | `data.messages` 为空数组、`has_more=false` | 如实回报"在指定筛选条件下没有匹配的邮件"，附上当前的 `--folder` / `--label` / `--query` / `--filter` 让用户确认范围；可建议放宽关键词或换文件夹 |
+| 404（资源不存在） | 接口返回 `NOT_FOUND` / 4xx 业务错误（如指定文件夹 / 标签 ID 不存在） | 回报"指定的文件夹 / 标签不存在"，请用户重新提供或调用 `user_mailbox.folders list` / `user_mailbox.labels list` 协助选择 |
+| 网络 / 权限错误（5xx / 401 / 403） | 5xx、401、403 或网络超时 | 回报错误类别（鉴权 / 权限 / 网络）并提示用户重试或检查 `--as` 身份与 scope；**不要**当作"无结果"继续推进 |
+
+> 详见 SKILL.md 「## ⛔ Non-goals（不应做的事）」第 1 条 与 「## ⚠️ 安全规则」第 9 条。
+
 ## 参考
 
 - [lark-mail](../SKILL.md) — 邮箱域总览

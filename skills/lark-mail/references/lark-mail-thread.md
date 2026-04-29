@@ -102,6 +102,18 @@ lark-cli mail +thread --thread-id <thread_id> --html=false --format json | \
 lark-cli mail +reply --message-id <last_message_id> --body "..."
 ```
 
+## ⛔ 空结果处理
+
+按 `--thread-id` 取整个会话时，"取不到"分三种语义，必须区分上报，**禁止**通过新建草稿、自发邮件等写操作凭空构造一个会话来满足后续动作（如"回复会话最新一封"）。
+
+| 情形 | 表现 | 正确做法 |
+|------|------|----------|
+| 200 OK 但 `messages` 为空 | 极少出现；若 `data.messages` 为空数组或 `data.thread` 缺失，视同会话不存在或已被全部删除 | 回报"该会话目前没有可读邮件（可能整个会话已被删除）"，请用户确认 `thread_id` 是否正确 |
+| 404（资源不存在） | 接口返回 `NOT_FOUND`，会话已被删除 / `thread_id` 错误 / 跨账号无权访问 | 回报"该会话不存在或已被删除"，附原 `thread_id`；可建议用 `+triage` 重新定位 |
+| 网络 / 权限错误（5xx / 401 / 403） | 5xx、401、403 或网络超时 | 回报错误类别（鉴权 / 权限 / 网络）并提示用户重试或检查 `--as` 身份与 scope；**不要**当作"会话不存在"继续推进 |
+
+> 详见 SKILL.md 「## ⛔ Non-goals（不应做的事）」第 1 条 与 「## ⚠️ 安全规则」第 9 条。
+
 ## 相关命令
 
 - `lark-cli mail +message` — 读取单封邮件

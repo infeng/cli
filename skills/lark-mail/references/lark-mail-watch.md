@@ -87,6 +87,18 @@ lark-cli mail +watch --print-output-schema
 {"ok":true,"data":{"message":{"message_id":"...","subject":"...","head_from":{...},"body_preview":"...","body_plain_text":"<base64url>","body_html":"<base64url>","attachments":[{"name":"report.pdf","size":102400}]}}}
 ```
 
+## ⛔ 空结果处理
+
+`+watch` 持续监听 WebSocket 事件流，"长时间没有事件"或"连接异常"分三种语义，必须区分上报。**禁止**为了让流程看起来"有进展"而通过 `+send` 自发邮件给自己以制造一个收信事件。
+
+| 情形 | 表现 | 正确做法 |
+|------|------|----------|
+| 长时间无事件（业务上的"空数组"） | 连接正常但收件箱在监听窗口内确实没有新邮件 | 如实回报"监听窗口内没有新邮件"，附监听时长 / 过滤条件；不要当作错误，也不要主动发信凑事件 |
+| 404 / 订阅缺失 | 启动时 WebSocket 握手成功但服务端返回订阅未注册（`mail.user_mailbox.event.message_received_v1` 未在应用 event 列表中） | 回报"事件订阅未注册"，提示用户在飞书开发者后台为应用添加 `mail.user_mailbox.event.message_received_v1`，并确保已申请 `mail:event` scope |
+| 网络 / 权限错误（5xx / 401 / 403 / WebSocket 断开） | 鉴权失败、scope 不足、网络中断、服务端 5xx | 回报错误类别并建议用户重试或检查身份；连接断开后**不要**改用 `+send` 自给自足，要先恢复监听 |
+
+> 详见 SKILL.md 「## ⛔ Non-goals（不应做的事）」第 1 条 与 「## ⚠️ 安全规则」第 9 条。
+
 ## 参考
 
 - [lark-mail](../SKILL.md) — 邮箱域总览
