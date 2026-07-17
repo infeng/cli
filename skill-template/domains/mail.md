@@ -416,6 +416,31 @@ lark-cli mail +message --message-id <id>
 
 **size 约束**：单模板 `template_content` ≤ 3 MB；`body + inline + SMALL` 累计 ≤ 25 MB（超过则该批次剩余非 inline 附件切换为 LARGE；inline 不能切换）。
 
+## 用户级发件人白名单与黑名单
+
+使用 `user_mailbox.allow_sender` 管理白名单，使用 `user_mailbox.blocked_sender` 管理黑名单。两个资源都提供 `list`、`batch_create` 和 `batch_remove`，没有独立的 `get` 或 `set` 方法：
+
+- 精确查询：调用 `list` 并传入完整地址作为 `keyword`，再从 `items` 中按 `sender` 精确匹配。`keyword` 是前缀搜索，不能把第一条结果直接当作精确命中。
+- 添加或覆盖名单归属：调用 `batch_create`。`sender_type=1` 表示邮箱地址，`sender_type=2` 表示域名；加入一侧名单时会移除另一侧的冲突记录。
+- 批量删除：调用 `batch_remove`，在 `senders` 中传入邮箱地址或域名。
+
+```bash
+# 精确查询白名单条目；黑名单查询将 allow_sender 替换为 blocked_sender
+lark-cli mail user_mailbox.allow_sender list \
+  --params '{"user_mailbox_id":"me","keyword":"sender@example.com"}' \
+  --jq '.items[] | select(.sender == "sender@example.com")'
+
+# 加入白名单
+lark-cli mail user_mailbox.allow_sender batch_create \
+  --params '{"user_mailbox_id":"me"}' \
+  --data '{"items":[{"sender":"sender@example.com","sender_type":1}]}'
+
+# 从白名单批量删除
+lark-cli mail user_mailbox.allow_sender batch_remove \
+  --params '{"user_mailbox_id":"me"}' \
+  --data '{"senders":["sender@example.com","example.org"]}'
+```
+
 ## 原生 API 调用规则
 
 没有 Shortcut 覆盖的操作才使用原生 API。标签、已读状态、移动文件夹优先使用 `+message-modify`；软删除优先使用 `+message-trash`。调用步骤以本节为准（API Resources 章节的 resource/method 列表可辅助查阅）。
